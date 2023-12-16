@@ -78,23 +78,12 @@ impl Tensor {
     }
 
     pub fn contiguous(&self) -> Self {
-        todo!()
+        Contiguous::default().apply(self, None, None, None, None)
     }
 
-    pub fn to_vec(&self) -> Vec<f32> {
-        let mut ret: Vec<f32> = Vec::new();
-        let bytes = self
-            .buffer
-            .realize()
-            .base()
-            .device_buffer
-            .as_deref()
-            .unwrap()
-            .to_cpu();
-        for n in bytes.windows(4).step_by(4) {
-            ret.push(f32::from_le_bytes([n[0], n[1], n[2], n[3]]));
-        }
-        ret
+    pub fn to_vec(&self) -> Vec<u8> {
+        println!("currently to_vec outputs a bytes vec");
+        self.buffer.to_cpu()
     }
 
     // ------------ Load
@@ -175,7 +164,7 @@ impl Tensor {
             type_to_dtype::<TensorDefaultType>(),
             None,
             None,
-        )
+        ).reshape(shape)
     }
 
     pub fn randn<S: Into<Shape>>(shape: S) -> Self {
@@ -375,7 +364,7 @@ impl Tensor {
     }
 
     pub fn cos(&self) -> Self {
-        (-self + core::f32::consts::PI / 2.0).sin()
+        ((core::f32::consts::PI / 2.0) - self).sin()
     }
 
     pub fn sqrt(&self) -> Self {
@@ -1141,7 +1130,7 @@ impl Tensor {
     }
 
     pub fn realize(&self) -> Self {
-        self.buffer.realize();
+        self.contiguous().buffer.realize();
         self.clone()
     }
 

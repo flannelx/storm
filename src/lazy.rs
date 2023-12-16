@@ -2,6 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+use half::f16;
+use rand::Rng;
+
 use crate::prelude::*;
 use crate::{
     arg::Arg,
@@ -95,8 +98,8 @@ impl core::fmt::Debug for LazyBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<LB {:?} id={:?} op={:?} st={:?} device_buffer={:?} _base={:?}>",
-            self.shape, self.id, self.lazyop.optype, self.st.views, self.device_buffer, self._base
+            "<LB id={:?} dtype={:?} op={:?} st={:?} device_buffer={:?}>",
+            self.id.0, self.dtype.type_name, self.lazyop.optype, self.st.views, self.device_buffer
         )
     }
 }
@@ -174,7 +177,6 @@ impl LazyBuffer {
         create_lazybuffer(
             device,
             ShapeTracker::new(shape, None),
-            optype.clone(),
             LazyOp::new(optype, ss, args),
             dtype,
             None,
@@ -196,6 +198,15 @@ impl LazyBuffer {
 
     pub fn from_cpu<T>(x: Vec<T>) -> Self {
         todo!()
+    }
+
+    pub fn to_cpu(&self) -> Vec<u8> {
+        self.realize()
+            .base()
+            .device_buffer
+            .as_deref()
+            .unwrap()
+            .to_cpu()
     }
 
     pub fn copy_to_device(&self, device: &str) -> Self {
@@ -226,7 +237,17 @@ impl LazyBuffer {
             && self.base().st.size() == self.st.size()
             && !self.is_unrealized_const()
         {
-            todo!()
+            return create_lazybuffer(
+                &self.device,
+                ShapeTracker::from_shape(&self.shape),
+                LazyOp::new(
+                    OpType::Load(Load::Contiguous),
+                    vec![LazyOpSrc::LazyBuffer(self.clone())],
+                    None,
+                ),
+                self.dtype.clone(),
+                self._base.clone(),
+            );
         }
         Self::loadop(
             OpType::Load(Load::Contiguous),
@@ -294,10 +315,10 @@ impl LazyBuffer {
             OpType::Reduce(_) => ret.lazyop = _ast_reduceops(&ret.lazyop).into(),
             OpType::Load(load) => match load {
                 Load::Empty => _realize_empty(self),
-                Load::Rand => todo!(),
+                Load::Rand => _realize_rand(self),
                 Load::Const => _realize_const(self),
                 Load::From => todo!(),
-                Load::Contiguous => todo!(),
+                Load::Contiguous => _realize_contiguous(self),
                 Load::Custom => todo!(),
             },
             _ => (),
@@ -305,8 +326,9 @@ impl LazyBuffer {
         //println!("2 ret {:?}", ret);
         if !ret.is_realized() {
             for x in ret.lazyop.buffers.iter_mut() {
-                *x = x.realize();
+                x.realize();
             }
+            //todo!("device exec ast");
         }
         //println!("3 ret {:?}", ret);
         ret
@@ -314,14 +336,16 @@ impl LazyBuffer {
 
     pub fn e<O: Into<OpType>>(&self, optype: O, srcs: &[Self], arg: Option<Vec<Arg>>) -> Self {
         let optype = optype.into();
-        let srcs = vec![&[self.clone()], srcs].concat();
+        let srcs: Vec<LazyBuffer> = vec![&[self.clone()], srcs].concat();
+        _push_movement_ops(&srcs.iter().map(|s| s).collect::<Vec<&Self>>());
         let out_device = srcs[0].device.clone();
         let out_shape = srcs[0].shape.clone();
-        let out_dtype = if srcs[0].dtype.size > srcs[1].dtype.size {
-            srcs[0].dtype.clone()
-        } else {
-            srcs[1].dtype.clone()
-        };
+        let out_dtype = c![s, for s in srcs.iter()]
+            .iter()
+            .max_by(|x, y| x.dtype.size.cmp(&y.dtype.size))
+            .unwrap()
+            .dtype
+            .clone();
         // # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
         //     if SHUFFLE_MOVEMENT_OPS: srcs = _push_movement_ops(srcs)
         //
@@ -345,7 +369,6 @@ impl LazyBuffer {
         create_lazybuffer(
             &out_device,
             ShapeTracker::new(&out_shape, None),
-            optype.clone(),
             LazyOp::new(optype, srcs, None),
             out_dtype,
             None,
@@ -361,7 +384,6 @@ impl LazyBuffer {
         create_lazybuffer(
             &self.device,
             ShapeTracker::new(new_shape, None),
-            optype.clone(),
             LazyOp::new(
                 optype,
                 srcs,
@@ -459,7 +481,6 @@ impl LazyBuffer {
         create_lazybuffer(
             &self.device,
             st,
-            optype.clone(),
             LazyOp::new(
                 optype,
                 vec![self.clone()],
@@ -646,16 +667,18 @@ impl LazyBuffer {
 pub fn create_lazybuffer(
     device: &str,
     st: ShapeTracker,
-    optype: OpType,
     op: LazyOp,
     dtype: Dtype,
     base: Option<Arc<LazyBuffer>>,
 ) -> LazyBuffer {
+    let optype = op.optype.clone();
     if matches!(
         optype,
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
-        return LazyBuffer::new(device, st, optype, op, dtype, None, base);
+        let ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
+        println!("{:?}", ret);
+        return ret;
     }
     // # wop is the deduping key. i feel this used to compare more deeply
     // wop = (device, dtype, optype, ref(op), ref(base) if base else None)
@@ -844,7 +867,7 @@ fn _realize_from(buffer: &LazyBuffer) {
 }
 
 fn _realize_empty(buffer: &LazyBuffer) {
-    let mut buffer = buffer.clone(); // LazyBuffer is cheap to clone, underlying device buffer is shared through Arc
+    let mut buffer = buffer.clone();
     unsafe {
         let x = Arc::get_mut_unchecked(&mut buffer.device_buffer);
         x.replace(DEVICE.alloc(
@@ -854,14 +877,52 @@ fn _realize_empty(buffer: &LazyBuffer) {
     }
 }
 
+fn _realize_rand(buffer: &LazyBuffer) {
+    let mut buffer = buffer.clone();
+    let numel = buffer.shape.iter().product::<isize>() as usize;
+    let mut on_cpu = Vec::with_capacity(numel);
+    for _ in 0..buffer.shape.iter().product::<isize>() as usize {
+        on_cpu.extend(gen_rand_num_bytes(&buffer.dtype));
+    }
+    unsafe {
+        let mut b = DEVICE.alloc(numel, buffer.dtype);
+        Arc::get_mut_unchecked(&mut b).from_cpu(on_cpu);
+        Arc::get_mut_unchecked(&mut buffer.device_buffer).replace(b);
+    }
+}
+
 fn _realize_const(buffer: &LazyBuffer) {
-    let mut buffer = buffer.clone(); // LazyBuffer is cheap to clone, underlying device buffer is shared through Arc
+    let mut buffer = buffer.clone();
     unsafe {
         if let Arg::Num(bytes) = &buffer.lazyop.args[0] {
             let mut b = DEVICE.alloc(1, buffer.dtype);
-            Arc::get_mut_unchecked(&mut b).from_cpu(bytes);
+            Arc::get_mut_unchecked(&mut b).from_cpu(bytes.to_vec());
             Arc::get_mut_unchecked(&mut buffer.device_buffer).replace(b);
         } else {
         }
     }
+}
+
+fn _realize_contiguous(buffer: &LazyBuffer) {
+    buffer.lazyop.src[0].lb().realize();
+}
+
+// Have to do this because the lack of num trait in Rust.
+// num_traits's traits are not object safe.
+fn gen_rand_num_bytes(dtype: &Dtype) -> Vec<u8> {
+    let mut rng = rand::thread_rng();
+    return match dtype.type_name {
+        "float16" => rng.gen::<f16>().to_le_bytes().to_vec(),
+        "float32" => rng.gen::<f32>().to_le_bytes().to_vec(),
+        "float64" => rng.gen::<f64>().to_le_bytes().to_vec(),
+        "uint8" => rng.gen::<u8>().to_le_bytes().to_vec(),
+        "uint16" => rng.gen::<u16>().to_le_bytes().to_vec(),
+        "uint32" => rng.gen::<u32>().to_le_bytes().to_vec(),
+        "uint64" => rng.gen::<u64>().to_le_bytes().to_vec(),
+        "int8" => rng.gen::<i8>().to_le_bytes().to_vec(),
+        "int16" => rng.gen::<i16>().to_le_bytes().to_vec(),
+        "int32" => rng.gen::<i32>().to_le_bytes().to_vec(),
+        "int64" => rng.gen::<i64>().to_le_bytes().to_vec(),
+        t => panic!("unable gen type t={t}"),
+    };
 }

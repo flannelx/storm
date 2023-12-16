@@ -5,11 +5,11 @@ use opencl3::context::Context;
 use opencl3::device::{get_all_devices, CL_DEVICE_TYPE_GPU};
 use opencl3::kernel::{ExecuteKernel, Kernel};
 use opencl3::memory::CL_MEM_READ_WRITE;
-use opencl3::types::CL_NON_BLOCKING;
+use opencl3::types::{CL_BLOCKING, CL_NON_BLOCKING};
 
 use crate::prelude::*;
 
-use super::{Program, Buffer, Device};
+use super::{Buffer, Device, Program};
 
 #[derive(Debug, Clone)]
 pub struct CLDevice {
@@ -88,14 +88,14 @@ impl Buffer for CLBuffer {
     }
 
     fn to_cpu(&self) -> Vec<u8> {
-        let mut dst = vec![0u8;self.size()];
+        let mut dst = vec![0u8; self.size()];
         let ptr = dst.as_mut_ptr() as *mut u8;
         DEVICE.copyout(self, ptr);
         dst
     }
 
-    fn from_cpu(&mut self, data: &[u8]) {
-        DEVICE.copyin(data.as_ptr() as *const u8,self);
+    fn from_cpu(&mut self, data: Vec<u8>) {
+        DEVICE.copyin(data, self);
     }
 
     fn size(&self) -> usize {
@@ -134,6 +134,10 @@ impl Device for CLDevice {
 
     fn synchronize(&self) {
         opencl3::command_queue::finish(self.queue.get()).expect("Queue finish failed");
+        let mut p_lock = PENDING_COPY.lock().unwrap();
+        while let Some(mem) = p_lock.0.pop() {
+            unsafe { std::ptr::drop_in_place(mem) }
+        }
     }
 
     fn copyout(&self, src: &dyn Buffer, dst: *mut u8) {
@@ -147,23 +151,27 @@ impl Device for CLDevice {
                 dst as opencl3::memory::cl_mem,
                 0,
                 core::ptr::null(),
-            ).expect("Copyout failed");
-            self.synchronize();
+            )
+            .expect("Copyout failed");
         }
     }
 
-    fn copyin(&self, src: *const u8, dst: &mut dyn Buffer) {
+    fn copyin(&self, mut src: Vec<u8>, dst: &mut dyn Buffer) {
+
         unsafe {
+            PENDING_COPY.lock().unwrap().0.push(src.as_mut_ptr());
             opencl3::command_queue::enqueue_write_buffer(
                 self.queue.get(),
                 dst.ptr(),
                 CL_NON_BLOCKING,
                 0,
                 dst.size(),
-                src as opencl3::memory::cl_mem,
+                src.as_mut_ptr() as opencl3::memory::cl_mem,
                 0,
                 core::ptr::null(),
-            ).expect("copyin failed");
+            )
+            .expect("copyin failed");
+            std::mem::forget(src);
         }
     }
 }

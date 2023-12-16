@@ -59,6 +59,11 @@ impl ShapeTracker {
         Self { views }
     }
 
+    pub fn from_shape(shape: &[isize]) -> Self {
+        let views = vec![View::new(shape, None, None, None)];
+        Self { views }
+    }
+
     pub fn contiguous(&self) -> bool {
         self.views.len() == 1 && self.views[0].contiguous
     }

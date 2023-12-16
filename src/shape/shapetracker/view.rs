@@ -33,7 +33,6 @@ pub struct View {
     pub strides: Vec<isize>,
     pub offset: isize,
     pub mask: Option<Vec<(isize, isize)>>,
-    pub shape_strides: Vec<(isize, isize)>,
     pub contiguous: bool,
 }
 
@@ -57,7 +56,6 @@ impl View {
                 .zip(strides_for_shape(shape).iter())
                 .all(|(s1, s2)| s1 == s2);
         Self {
-            shape_strides: to_shape_strides(&shape, &strides),
             shape: shape.to_vec(),
             strides,
             offset,

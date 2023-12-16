@@ -68,7 +68,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<$t> for Tensor {
             type Output = Tensor;
             fn $fn(self, rhs: $t) -> Self::Output {
-                let rhs = Tensor::from([rhs]);
+                let rhs = Tensor::_const(rhs);
                 Tensor::$fn(&self, &rhs)
             }
         }
@@ -76,7 +76,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<$t> for &Tensor {
             type Output = Tensor;
             fn $fn(self, rhs: $t) -> Self::Output {
-                let rhs = Tensor::from([rhs]);
+                let rhs = Tensor::_const(rhs);
                 Tensor::$fn(self, &rhs)
             }
         }
@@ -84,7 +84,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<&$t> for Tensor {
             type Output = Tensor;
             fn $fn(self, rhs: &$t) -> Self::Output {
-                let rhs = Tensor::from([*rhs]);
+                let rhs = Tensor::_const(*rhs);
                 Tensor::$fn(&self, &rhs)
             }
         }
@@ -92,7 +92,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<&$t> for &Tensor {
             type Output = Tensor;
             fn $fn(self, rhs: &$t) -> Self::Output {
-                let rhs = Tensor::from([*rhs]);
+                let rhs = Tensor::_const(*rhs);
                 Tensor::$fn(&self, &rhs)
             }
         }
@@ -100,7 +100,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<Tensor> for $t {
             type Output = Tensor;
             fn $fn(self, rhs: Tensor) -> Self::Output {
-                let lhs = Tensor::from([self]);
+                let lhs = Tensor::_const(self);
                 Tensor::$fn(&lhs, &rhs)
             }
         }
@@ -108,7 +108,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<Tensor> for &$t {
             type Output = Tensor;
             fn $fn(self, rhs: Tensor) -> Self::Output {
-                let lhs = Tensor::from([*self]);
+                let lhs = Tensor::_const(*self);
                 Tensor::$fn(&lhs, &rhs)
             }
         }
@@ -116,7 +116,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<&Tensor> for $t {
             type Output = Tensor;
             fn $fn(self, rhs: &Tensor) -> Self::Output {
-                let lhs = Tensor::from([self]);
+                let lhs = Tensor::_const(self);
                 Tensor::$fn(&lhs, &rhs)
             }
         }
@@ -124,7 +124,7 @@ macro_rules! core_impl_num {
         impl core::ops::$op<&Tensor> for &$t {
             type Output = Tensor;
             fn $fn(self, rhs: &Tensor) -> Self::Output {
-                let lhs = Tensor::from([*self]);
+                let lhs = Tensor::_const(*self);
                 Tensor::$fn(&lhs, rhs)
             }
         }

@@ -1,6 +1,12 @@
 use storm::prelude::*;
 
 fn main() {
-    let c = Tensor::ones([100, 100]);
-    println!("{:?}", c.realize().to_vec());
+    let a = Tensor::rand([1_000_000]);
+    a.realize();
+    let out = a.realize().to_vec();
+    let mut v = Vec::new();
+    for n in out.windows(a.dtype.size).step_by(a.dtype.size) {
+        v.push(f32::from_le_bytes(n.try_into().unwrap()))
+    }
+    println!("{v:?}");
 }
