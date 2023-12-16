@@ -6,8 +6,8 @@ use num_traits::One;
 use num_traits::Zero;
 
 use crate::arg::Arg;
-use crate::dtype::NumType;
 use crate::dtype::type_to_dtype;
+use crate::dtype::NumType;
 use crate::ops::Load;
 use crate::ops::OpType;
 use crate::prelude::*;
@@ -19,8 +19,6 @@ use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-pub type TensorDefaultType = f32;
-
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub struct TensorId(pub(crate) usize);
 
@@ -30,17 +28,17 @@ pub(crate) fn tensor_id() -> TensorId {
 }
 
 #[derive(Clone)]
-pub struct Tensor {
+pub struct Tensor<T: NumType = f32> {
     pub buffer: LazyBuffer,
     pub require_grad: bool,
-    pub grad: Arc<Mutex<Option<Tensor>>>,
-    pub _ctx: Option<Box<dyn Function>>,
+    pub grad: Arc<Mutex<Option<Tensor<T>>>>,
+    pub _ctx: Option<Box<dyn Function<T>>>,
     pub id: TensorId,
     pub dtype: Dtype,
     pub device: String,
 }
 
-impl Tensor {
+impl<T: NumType> Tensor<T> {
     pub fn device(&self) -> String {
         self.device.clone()
     }
@@ -69,7 +67,7 @@ impl Tensor {
         }
     }
 
-    pub fn from<T: num_traits::Num, V: Into<Vec<T>>>(data: V) -> Self {
+    pub fn from<V: Into<Vec<T>>>(data: V) -> Self {
         let data = data.into();
         let buffer = LazyBuffer::from_cpu(data);
         Self {
@@ -87,11 +85,18 @@ impl Tensor {
         Contiguous::default().apply(self, None, None, None, None)
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
+    pub fn to_vec(&self) -> Vec<T> {
         println!("currently to_vec outputs a bytes vec");
-        let ret = self.buffer.to_cpu(); // this is aysnc;
-        DEVICE.synchronize();
-        ret
+        unsafe {
+            let mut ret = self.buffer.to_cpu(); // this is aysnc;
+            DEVICE.synchronize();
+            let ret_ptr = ret.as_mut_ptr() as *mut T;
+            let len = ret.len();
+            std::mem::forget(ret);
+            let size = std::mem::size_of::<T>();
+            let ret = Vec::from_raw_parts(ret_ptr, len / size, len / size);
+            ret
+        }
     }
 
     // ------------ Load
@@ -133,7 +138,7 @@ impl Tensor {
         Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None, None)
     }
 
-    pub fn _const<T: NumType>(value: T) -> Self {
+    pub fn _const(value: T) -> Self {
         let dtype = crate::dtype::name_to_dtype(std::any::type_name::<T>());
         Self::_load(
             OpType::Load(Load::Const),
@@ -144,7 +149,7 @@ impl Tensor {
         )
     }
 
-    pub fn const_like<T: NumType>(&self, const_value: T) -> Self {
+    pub fn const_like(&self, const_value: T) -> Self {
         Self::_const(const_value)
             .reshape(vec![1; self.shape().len()])
             .expand(self.shape().dims)
@@ -152,14 +157,14 @@ impl Tensor {
 
     pub fn zeros<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::_const(0)
+        Self::_const(T::zero())
             .reshape(vec![1; shape.len()])
             .expand(shape.dims)
     }
 
     pub fn ones<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::_const(1)
+        Self::_const(T::one())
             .reshape(vec![1; shape.len()])
             .expand(shape.dims)
     }
@@ -169,7 +174,7 @@ impl Tensor {
         Self::_load(
             OpType::Load(Load::Rand),
             shape.numel(),
-            type_to_dtype::<TensorDefaultType>(),
+            type_to_dtype::<T>(),
             None,
             None,
         )
@@ -224,7 +229,7 @@ impl Tensor {
         // mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(dtypes.bool)
         // return self * mask * (1/(1.0 - p))
         let p = if p.is_some() { p.unwrap() } else { 0.2 };
-        let mask = Self::rand(self.shape())._ge(&Tensor::from([p]));
+        let mask = Self::rand(self.shape())._ge(&Tensor::from([T::from_f32(p).unwrap()]));
         self * mask * (1.0 / (1.0 - p))
     }
 
@@ -258,11 +263,7 @@ impl Tensor {
         Shrink::default().apply(self, None, None, Some(flatten_p), None)
     }
 
-    pub fn pad<A: Into<Vec<(usize, usize)>>>(
-        &self,
-        arg: A,
-        const_value: impl NumType,
-    ) -> Self {
+    pub fn pad<A: Into<Vec<(usize, usize)>>>(&self, arg: A, const_value: impl NumType) -> Self {
         let flatten_p: Vec<isize> = arg
             .into()
             .iter()
@@ -285,11 +286,7 @@ impl Tensor {
         // }
     }
 
-    pub fn pad2d<P: Into<Vec<usize>>>(
-        &self,
-        padding: P,
-        const_value: impl NumType,
-    ) -> Self {
+    pub fn pad2d<P: Into<Vec<usize>>>(&self, padding: P, const_value: impl NumType) -> Self {
         let padding = padding.into();
         let slc: Vec<(isize, isize)> = padding
             .iter()
@@ -423,7 +420,7 @@ impl Tensor {
             .sum_keepdim(0)
     }
 
-    pub fn _reduce<F: 'static + Function>(
+    pub fn _reduce<F: 'static + Function<T>>(
         &self,
         mut fxn: F,
         axis: Vec<isize>,
@@ -440,11 +437,12 @@ impl Tensor {
             let fxn_name = std::any::type_name::<F>().split("::").last().unwrap();
             return Self::full(
                 c![if s == 0 { 1 } else { s }, for s in self.shape().dims],
-                if fxn_name == "Sum" {
+                T::from_f32(if fxn_name == "Sum" {
                     0.0
                 } else {
                     -f32::INFINITY
-                },
+                })
+                .unwrap(),
             );
         }
         let new_shape = c![if axis_.contains(&(i as isize)) { 1 } else { *s }, for (i, s) in self.shape().dims.iter().enumerate()];
@@ -680,11 +678,7 @@ impl Tensor {
         xup
     }
 
-    pub fn slice<A: Into<Vec<(isize, isize)>>>(
-        &self,
-        arg: A,
-        const_value: impl NumType,
-    ) -> Self {
+    pub fn slice<A: Into<Vec<(isize, isize)>>>(&self, arg: A, const_value: impl NumType) -> Self {
         let arg = arg.into();
         let self_shape = self.shape();
         let padding: Vec<(usize, usize)> = arg
@@ -998,17 +992,17 @@ impl Tensor {
         // if stop is None: stop, start = start, 0
         // return Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
         let s = ((stop - start) / step).ceil() as isize;
-        Self::full([s], step).cumsum() + (start - step)
+        Self::full([s], T::from_f32(step).unwrap()).cumsum() + (start - step)
     }
 
-    pub fn full<S: Into<Vec<isize>>>(shape: S, const_: impl NumType) -> Self {
+    pub fn full<S: Into<Vec<isize>>>(shape: S, const_: T) -> Self {
         let shape = shape.into();
         //panic!("in _full to_shape:{}", shape);
         Self::_const(const_)
             .reshape(vec![1; shape.len()])
             .expand(shape)
     }
-    pub fn full_like(&self, const_: impl NumType) -> Self {
+    pub fn full_like(&self, const_: T) -> Self {
         let shape = self.shape();
         Self::_const(const_)
             .reshape(vec![1; shape.len()])
@@ -1035,7 +1029,7 @@ impl Tensor {
 
     // self is pred
     pub fn sparse_categorical_crossentropy(&self, y: &Self) -> Self {
-        let loss_mark = y._ne(&y.full_like(-1.0));
+        let loss_mark = y._ne(&y.full_like(T::from_f32(-1.0).unwrap()));
         //y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
         let mut y_counter = Self::arange(self.shape()[-1] as f32);
         y_counter = y_counter
@@ -1067,8 +1061,8 @@ impl Tensor {
     }
 
     pub fn clip(&self, min: f32, max: f32) -> Self {
-        self.maximum(&Tensor::from([min]))
-            .minimum(&Tensor::from([max]))
+        self.maximum(&Tensor::from([T::from_f32(min).unwrap()]))
+            .minimum(&Tensor::from([T::from_f32(max).unwrap()]))
     }
 
     pub fn maximum(&self, x: &Self) -> Self {
@@ -1131,9 +1125,9 @@ impl Tensor {
         self._lt(rhs) + self._gt(rhs)
     }
 
-    pub fn _where<N: NumType>(&self, y: N, z: N) -> Self {
-        let y = Self::_const(y);
-        let z = Self::_const(z);
+    pub fn _where(&self, y: f32, z: f32) -> Self {
+        let y = Self::_const(T::from_f32(y).unwrap());
+        let z = Self::_const(T::from_f32(z).unwrap());
         self._where_(&y, &z)
     }
 
