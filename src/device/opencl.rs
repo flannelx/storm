@@ -91,7 +91,6 @@ impl Buffer for CLBuffer {
         let mut dst = vec![0u8; self.size()];
         let ptr = dst.as_mut_ptr() as *mut u8;
         DEVICE.copyout(self, ptr);
-        DEVICE.synchronize();
         dst
     }
 

@@ -89,7 +89,9 @@ impl Tensor {
 
     pub fn to_vec(&self) -> Vec<u8> {
         println!("currently to_vec outputs a bytes vec");
-        self.buffer.to_cpu()
+        let ret = self.buffer.to_cpu(); // this is aysnc;
+        DEVICE.synchronize();
+        ret
     }
 
     // ------------ Load
