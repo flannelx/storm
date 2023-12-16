@@ -104,6 +104,51 @@ macro_rules! c {
         }
     );
 
+    ////////////
+    ($exp:expr, for $i:pat in $iter:expr, if $cond:expr) => (
+        {
+            let mut r = vec![];
+            for $i in $iter {
+                if $cond {
+                    r.push($exp.clone());
+                }
+            }
+            r
+        }
+    );
+
+
+    ($exp:expr, for $i:pat in $iter:expr, for $i2:ident in $iter2:expr, if $cond:expr) => (
+        {
+            let mut r = vec![];
+            for $i2 in $iter2 {
+                for $i in $iter {
+                    if $cond{
+                        r.push($exp);
+                    }
+                }
+            }
+            r
+        }
+    );
+
+    ($exp:expr, for $i:pat in $iter:expr, for $i2:pat in $iter2:expr, for $i3:pat in $iter3:expr, if $cond:expr) => (
+        {
+            let mut r = vec![];
+            for $i in $iter {
+                for $i2 in $iter2 {
+                    for $i3 in $iter3 {
+                        if $cond {
+                            r.push($exp);
+                        }
+                    }
+                }
+            }
+            r
+        }
+    );
+    /////////////
+
     ($key:expr => $val:expr, for $p:pat in $iter:expr) => (
         {
             use std::collections::HashMap;
@@ -152,6 +197,33 @@ macro_rules! c {
         }
     );
 }
+
+#[macro_export]
+macro_rules! view {
+    ($shape: expr) => {
+        View::new(&$shape.to_vec(), None, None, None)
+    };
+    ($shape: expr, $strides: expr) => {
+        View::new(&$shape.to_vec(), Some($strides.to_vec()), None, None)
+    };
+    ($shape: expr, $strides: expr, $offset: expr) => {
+        View::new(
+            &$shape.to_vec(),
+            Some($strides.to_vec()),
+            Some($offset),
+            None,
+        )
+    };
+    ($shape: expr, $strides: expr, $offset: expr, $mask: expr) => {
+        View::new(
+            &$shape.to_vec(),
+            Some($strides.to_vec()),
+            Some($offset),
+            Some($mask.to_vec()),
+        )
+    };
+}
+
 
 mod tests {
     use std::collections::HashMap;
@@ -336,3 +408,4 @@ mod tests {
 
 pub use super::izip;
 pub use super::c;
+pub use super::view;

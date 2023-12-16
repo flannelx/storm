@@ -1,7 +1,12 @@
 pub mod core_ops;
 pub mod mlops;
 pub mod shape;
+use half::f16;
+use num_traits::One;
+use num_traits::Zero;
+
 use crate::arg::Arg;
+use crate::dtype::NumType;
 use crate::dtype::type_to_dtype;
 use crate::ops::Load;
 use crate::ops::OpType;
@@ -10,6 +15,7 @@ use crate::prelude::*;
 use crate::tensor::mlops::*;
 use crate::tensor::shape::Shape;
 use std::collections::HashSet;
+use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -125,18 +131,18 @@ impl Tensor {
         Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None, None)
     }
 
-    pub fn _const<T: num_traits::ToBytes>(value: T) -> Self {
+    pub fn _const<T: NumType>(value: T) -> Self {
         let dtype = crate::dtype::name_to_dtype(std::any::type_name::<T>());
         Self::_load(
             OpType::Load(Load::Const),
             1,
             dtype,
             None,
-            Some(vec![Arg::Num(value.to_le_bytes().as_ref().to_vec())]),
+            Some(vec![Arg::Num(value._to_le_bytes())]),
         )
     }
 
-    pub fn const_like<T: num_traits::ToBytes>(&self, const_value: T) -> Self {
+    pub fn const_like<T: NumType>(&self, const_value: T) -> Self {
         Self::_const(const_value)
             .reshape(vec![1; self.shape().len()])
             .expand(self.shape().dims)
@@ -144,14 +150,14 @@ impl Tensor {
 
     pub fn zeros<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::_const(0 as TensorDefaultType)
+        Self::_const(0)
             .reshape(vec![1; shape.len()])
             .expand(shape.dims)
     }
 
     pub fn ones<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::_const(1 as TensorDefaultType)
+        Self::_const(1)
             .reshape(vec![1; shape.len()])
             .expand(shape.dims)
     }
@@ -164,7 +170,8 @@ impl Tensor {
             type_to_dtype::<TensorDefaultType>(),
             None,
             None,
-        ).reshape(shape)
+        )
+        .reshape(shape)
     }
 
     pub fn randn<S: Into<Shape>>(shape: S) -> Self {
@@ -252,7 +259,7 @@ impl Tensor {
     pub fn pad<A: Into<Vec<(usize, usize)>>>(
         &self,
         arg: A,
-        const_value: impl num_traits::ToBytes,
+        const_value: impl NumType,
     ) -> Self {
         let flatten_p: Vec<isize> = arg
             .into()
@@ -265,7 +272,7 @@ impl Tensor {
             None,
             None,
             Some(flatten_p.into()),
-            Some(const_value.to_le_bytes().as_ref().to_vec()),
+            Some(const_value._to_le_bytes()),
         )
         // Tensor {
         //     inner: self.inner.pad(arg, const_value),
@@ -279,7 +286,7 @@ impl Tensor {
     pub fn pad2d<P: Into<Vec<usize>>>(
         &self,
         padding: P,
-        const_value: impl num_traits::ToBytes,
+        const_value: impl NumType,
     ) -> Self {
         let padding = padding.into();
         let slc: Vec<(isize, isize)> = padding
@@ -379,7 +386,14 @@ impl Tensor {
         self.sin() / self.cos()
     }
 
+    pub fn _sum(&self, axis: Vec<isize>, keepdim: bool) -> Self {
+        self._reduce(Sum::default(), axis, keepdim)
+    }
+
     pub fn sum_keepdim(&self, axis: isize) -> Self {
+        if self.shape().dims == [1, 1, 16, 63, 63, 4, 1, 1] {
+            panic!();
+        }
         let axis = if axis < 0 {
             self.shape().len() as isize + axis
         } else {
@@ -407,8 +421,37 @@ impl Tensor {
             .sum_keepdim(0)
     }
 
-    pub fn _reduce(&self, fxn: impl Function, axis: Option<Vec<isize>>, keepdim: bool) -> Self {
-        todo!()
+    pub fn _reduce<F: 'static + Function>(
+        &self,
+        mut fxn: F,
+        axis: Vec<isize>,
+        keepdim: bool,
+    ) -> Self {
+        let axis_ = if axis.len() > 0 {
+            axis
+        } else {
+            (0..self.shape().len()).map(|i| i as isize).collect()
+        };
+        let axis_ = c![if x >= 0 { x } else { x + self.shape().len() as isize }, for x in axis_];
+        let shape = c![s, for (i, s) in self.shape().dims.iter().enumerate(), if !axis_.contains(&(i as isize))];
+        if self.shape().dims.contains(&0) && !shape.contains(&0) {
+            let fxn_name = std::any::type_name::<F>().split("::").last().unwrap();
+            return Self::full(
+                c![if s == 0 { 1 } else { s }, for s in self.shape().dims],
+                if fxn_name == "Sum" {
+                    0.0
+                } else {
+                    -f32::INFINITY
+                },
+            );
+        }
+        let new_shape = c![if axis_.contains(&(i as isize)) { 1 } else { *s }, for (i, s) in self.shape().dims.iter().enumerate()];
+        let ret = fxn.apply(self, None, None, Some(new_shape), None);
+        if keepdim {
+            ret
+        } else {
+            ret.reshape(shape)
+        }
     }
 
     pub fn ndim(&self) -> usize {
@@ -587,51 +630,45 @@ impl Tensor {
     #[rustfmt::skip]
     pub fn _pool<S: Into<Shape>>(&self, k_: S, stride: usize, dilation: usize) -> Self {
         let self_shape = self.shape();
-        let k_ = k_.into().dims.iter().map(|n| *n as usize).collect::<Vec<usize>>();
-        let d_ = vec![dilation;k_.len()];
-        let s_ = vec![stride;k_.len()];
+        let k_ = k_.into().dims.iter().map(|n| *n).collect::<Vec<isize>>();
+        let d_ = vec![dilation as isize;k_.len()];
+        let s_ = vec![stride as isize;k_.len()];
         assert!(self_shape.len() >= k_.len(), "can't pool {self_shape:?} with {k_:?}");
         assert!(k_.len() == s_.len() && s_.len() == d_.len(), "stride/dilation mismatch kernel:{k_:?} stride:{s_:?} dilation:{d_:?}");
         let slc_prefix: Vec<(isize, isize)> = self_shape.dims[0..self_shape.len() - k_.len()]
             .iter()
-            .map(|sh| (0, *sh as isize))
+            .map(|sh| (0, *sh))
             .collect();
-        let prefix: Vec<usize> = self_shape.dims[0..self_shape.len() - k_.len()]
+        let prefix: Vec<isize> = self_shape.dims[0..self_shape.len() - k_.len()]
             .iter()
-            .map(|sh| *sh as usize)
+            .map(|sh| *sh)
             .collect();
-        let i_: Vec<usize> = self_shape.dims[self_shape.len() - k_.len()..]
+        let i_: Vec<isize> = self_shape.dims[self_shape.len() - k_.len()..]
             .iter()
-            .map(|sh| *sh as usize)
+            .map(|sh| *sh)
             .collect();
-
         let xup = if k_.iter().zip(s_.iter()).any(|(k, s)| k > s) || d_.iter().any(|d| *d != 1) {
-            let o_: Vec<usize> = i_
-                .iter()
-                .zip(d_.iter().zip(k_.iter().zip(s_.iter())))
-                .map(|(i, (d, (k, s)))| (i - d * (k - 1) - 1) / s + 1)
-                .collect();
-            let e_: Vec<usize> = k_
+            let o_ = c![(i - d * (k - 1) - 1) / s + 1, for (i, d, k, s) in izip!(i_.iter(), d_.iter(), k_.iter(), s_.iter())];
+            let e_: Vec<isize> = k_
                 .iter()
                 .zip(i_.iter().zip(d_.iter()))
-                .map(|(k, (i, d))| f32::ceil((k * (i + d)) as f32 / *i as f32) as usize)
+                .map(|(k, (i, d))| f32::ceil((k * (i + d)) as f32 / *i as f32) as isize)
                 .collect();
             self.reshape([prefix.clone(), i_.iter().flat_map(|i| [1, *i]).collect()].concat())
                 .expand([prefix.clone(), e_.iter().zip(i_.iter()).flat_map(|(e, i)| [*e, *i]).collect()].concat())
                 .reshape([prefix.clone(), e_.iter().zip(i_.iter()).map(|(e, i)| *e * *i).collect()].concat())
-                .slice(vec![slc_prefix.clone(), c![(0, (k*(i+d)) as isize), for (k, i, d) in izip!(k_.iter(), i_.iter(), d_.iter())]].concat(), 0)
+                .slice(vec![slc_prefix.clone(), c![(0, k*(i+d)), for (k, i, d) in izip!(k_.iter(), i_.iter(), d_.iter())]].concat(), 0)
                 .reshape(vec![prefix.clone(), c![[*k, i + d], for (k, i, d) in izip!(k_.iter(), i_.iter(), d_.iter())].concat()].concat())
-                .slice(vec![slc_prefix.clone(), c![[(0, *k as isize),(0, (o * s) as isize)], for (k, o, s) in izip!(k_.iter(), o_.iter(), s_.iter())].concat()].concat(), 0)
+                .slice(vec![slc_prefix.clone(), c![[(0, *k),(0, o * s)], for (k, o, s) in izip!(k_.iter(), o_.iter(), s_.iter())].concat()].concat(), 0)
                 .reshape(vec![prefix.clone(), c![[k, o, s], for (&k, &o, &s) in izip!(k_.iter(), o_.iter(), s_.iter())].concat()].concat())
-                .slice(vec![slc_prefix.clone(), c![[(0, *k as isize), (0, *o as isize), (0, 1)], for (k, o) in izip!(k_.iter(), o_.iter())].concat()].concat(), 0)
+                .slice(vec![slc_prefix.clone(), c![[(0, *k), (0, *o), (0, 1)], for (k, o) in izip!(k_.iter(), o_.iter())].concat()].concat(), 0)
                 .reshape(vec![prefix.clone(), c![[k, o], for (&k, &o) in izip!(k_.iter(), o_.iter())].concat()].concat())
                 .permute(vec![c![i, for i in 0..prefix.len()], c![prefix.len() + i * 2 + 1, for i in 0..k_.len()], c![prefix.len() + i * 2, for i in 0..k_.len()]].concat())
         } else {
-            let o_:Vec<usize> = i_.iter().zip(s_.iter().zip(k_.iter())).map(|(i, (s, k))| (*i+(*s-*k))/s).collect();
-
-            let mut xup = self.slice(vec![slc_prefix.clone(), c![(0, (o * s)as isize), for (&o, &s) in izip!(o_.iter(), s_.iter())]].concat(), 0);
+            let o_ = c![(i+(s-k))/s, for (i, s, k) in izip!(i_.iter(), s_.iter(), k_.iter())];
+            let mut xup = self.slice(vec![slc_prefix.clone(), c![(0, o * s), for (&o, &s) in izip!(o_.iter(), s_.iter())]].concat(), 0);
             xup = xup.reshape(vec![prefix.clone(), c![[o, s], for (&o, &s) in izip!(o_.iter(), s_.iter())].concat()].concat());
-            let mut xup = self.slice(vec![slc_prefix.clone(), c![[(0, o as isize), (0, k as isize)], for (&o, &k) in izip!(o_.iter(), k_.iter())].concat()].concat(), 0);
+            xup = xup.slice(vec![slc_prefix.clone(), c![[(0, o), (0, k)], for (&o, &k) in izip!(o_.iter(), k_.iter())].concat()].concat(), 0);
 
             let mut tmp: Vec<usize> = (0..prefix.len()).into_iter().collect();
             tmp.extend((0..k_.len()).map(|i| prefix.len() + i * 2));
@@ -644,7 +681,7 @@ impl Tensor {
     pub fn slice<A: Into<Vec<(isize, isize)>>>(
         &self,
         arg: A,
-        const_value: impl num_traits::ToBytes,
+        const_value: impl NumType,
     ) -> Self {
         let arg = arg.into();
         let self_shape = self.shape();
@@ -759,10 +796,8 @@ impl Tensor {
         w_rsh_tmp.push(cin);
         w_rsh_tmp.extend(hw.iter());
         let mut ret = x * weight.reshape(w_rsh_tmp);
-        for i in 0..oyx.len() + 1 {
-            let reduce_i = -1 - (i as isize);
-            ret = ret.sum_keepdim(reduce_i);
-        }
+        ret._sum(c![-1-(i as isize), for i in 0..1+oyx.len()], true)
+            .reshape(vec![vec![bs, cout], oyx.clone()].concat());
         let mut ret_rsh_tmp = vec![bs, cout];
         ret_rsh_tmp.extend(oyx.iter());
         ret = ret.reshape(ret_rsh_tmp);
@@ -964,14 +999,14 @@ impl Tensor {
         Self::full([s], step).cumsum() + (start - step)
     }
 
-    pub fn full<S: Into<Vec<isize>>>(shape: S, const_: impl num_traits::ToBytes) -> Self {
+    pub fn full<S: Into<Vec<isize>>>(shape: S, const_: impl NumType) -> Self {
         let shape = shape.into();
         //panic!("in _full to_shape:{}", shape);
         Self::_const(const_)
             .reshape(vec![1; shape.len()])
             .expand(shape)
     }
-    pub fn full_like(&self, const_: impl num_traits::ToBytes) -> Self {
+    pub fn full_like(&self, const_: impl NumType) -> Self {
         let shape = self.shape();
         Self::_const(const_)
             .reshape(vec![1; shape.len()])
@@ -1010,7 +1045,7 @@ impl Tensor {
 
         let yy = (y_counter
             ._eq(&y.flatten().reshape([y.shape().numel(), 1]))
-            ._where(-1., 0.)
+            ._where(-1.0, 1.0)
             * loss_mark.reshape([loss_mark.shape().numel(), 1]))
         .reshape(y_rsh);
         (self.log_softmax() * yy).sum_all() / loss_mark.sum_all()
@@ -1094,7 +1129,7 @@ impl Tensor {
         self._lt(rhs) + self._gt(rhs)
     }
 
-    pub fn _where(&self, y: TensorDefaultType, z: TensorDefaultType) -> Self {
+    pub fn _where<N: NumType>(&self, y: N, z: N) -> Self {
         let y = Self::_const(y);
         let z = Self::_const(z);
         self._where_(&y, &z)

@@ -91,6 +91,7 @@ impl Buffer for CLBuffer {
         let mut dst = vec![0u8; self.size()];
         let ptr = dst.as_mut_ptr() as *mut u8;
         DEVICE.copyout(self, ptr);
+        DEVICE.synchronize();
         dst
     }
 
@@ -157,7 +158,6 @@ impl Device for CLDevice {
     }
 
     fn copyin(&self, mut src: Vec<u8>, dst: &mut dyn Buffer) {
-
         unsafe {
             PENDING_COPY.lock().unwrap().0.push(src.as_mut_ptr());
             opencl3::command_queue::enqueue_write_buffer(

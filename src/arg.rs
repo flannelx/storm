@@ -30,7 +30,7 @@ impl Arg {
         }
     }
 
-    pub fn to_num<T: dtype::FromBytes>(&self) -> T {
+    pub fn to_num<T: dtype::NumType>(&self) -> T {
         match self {
             Arg::Num(bytes) => T::from_le_bytes(bytes),
             t => panic!("Can not to_buf() {t:?}"),

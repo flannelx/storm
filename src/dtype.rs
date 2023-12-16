@@ -1,5 +1,7 @@
 #![allow(non_upper_case_globals)]
 
+use half::{bf16, f16};
+
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Dtype {
     pub priority: usize,
@@ -286,7 +288,7 @@ pub fn name_to_dtype(name: &str) -> Dtype {
 }
 
 pub fn type_to_dtype<T>() -> Dtype {
-    let name = std::any::type_name::<T>();
+    let name = std::any::type_name::<T>().split("::").last().unwrap();
     match name {
         "f16" => float16,
         "f32" => float32,
@@ -313,32 +315,58 @@ pub fn type_to_dtype<T>() -> Dtype {
     }
 }
 
-pub trait FromBytes {
+pub trait NumType:
+    'static
+    + core::fmt::Debug
+    + Default
+    + Copy
+    + Send
+    + Sync
+    + num_traits::FromPrimitive
+    + num_traits::ToPrimitive
+    + num_traits::Num
+    + core::ops::AddAssign
+    + core::ops::SubAssign
+    + core::ops::MulAssign
+    + core::ops::DivAssign
+    + core::ops::Add<Self, Output = Self>
+    + core::ops::Sub<Self, Output = Self>
+    + core::ops::Mul<Self, Output = Self>
+    + core::ops::Div<Self, Output = Self>
+    + PartialEq
+    + PartialOrd
+{
     fn from_le_bytes(bytes: &[u8]) -> Self;
+    fn _to_le_bytes(&self) -> Vec<u8>;
 }
 
-macro_rules! FromBytesImpl {
+macro_rules! NumTypeImpl {
     ($t:tt) => {
-        impl FromBytes for $t {
+        impl NumType for $t {
             fn from_le_bytes(bytes: &[u8]) -> Self {
                 $t::from_le_bytes(bytes.try_into().expect(&format!(
                     "Unable to get '{}' from {bytes:?}",
                     std::any::type_name::<Self>()
                 )))
             }
+            fn _to_le_bytes(&self) -> Vec<u8> {
+                self.to_le_bytes().to_vec()
+            }
         }
     };
 }
 
-FromBytesImpl!(u8);
-FromBytesImpl!(u16);
-FromBytesImpl!(u32);
-FromBytesImpl!(u64);
-FromBytesImpl!(usize);
-FromBytesImpl!(i8);
-FromBytesImpl!(i16);
-FromBytesImpl!(i32);
-FromBytesImpl!(i64);
-FromBytesImpl!(isize);
-FromBytesImpl!(f32);
-FromBytesImpl!(f64);
+NumTypeImpl!(u8);
+NumTypeImpl!(u16);
+NumTypeImpl!(u32);
+NumTypeImpl!(u64);
+NumTypeImpl!(usize);
+NumTypeImpl!(i8);
+NumTypeImpl!(i16);
+NumTypeImpl!(i32);
+NumTypeImpl!(i64);
+NumTypeImpl!(isize);
+NumTypeImpl!(f32);
+NumTypeImpl!(f64);
+NumTypeImpl!(f16);
+NumTypeImpl!(bf16);

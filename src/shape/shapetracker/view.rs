@@ -1,31 +1,6 @@
 use super::util::*;
 use crate::shape::symbolic::{ands, num, sum, var, ArcNode};
-
-#[macro_export]
-macro_rules! view {
-    ($shape: expr) => {
-        View::new(&$shape.to_vec(), None, None, None)
-    };
-    ($shape: expr, $strides: expr) => {
-        View::new(&$shape.to_vec(), Some($strides.to_vec()), None, None)
-    };
-    ($shape: expr, $strides: expr, $offset: expr) => {
-        View::new(
-            &$shape.to_vec(),
-            Some($strides.to_vec()),
-            Some($offset),
-            None,
-        )
-    };
-    ($shape: expr, $strides: expr, $offset: expr, $mask: expr) => {
-        View::new(
-            &$shape.to_vec(),
-            Some($strides.to_vec()),
-            Some($offset),
-            Some($mask.to_vec()),
-        )
-    };
-}
+use crate::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct View {
@@ -209,9 +184,16 @@ impl View {
             return Some(self.clone());
         }
         assert!(new_shape.iter().all(|&sh| sh > 0));
-        assert!(self.shape.iter().product::<isize>() == new_shape.iter().product::<isize>());
-        if self.contiguous && self.shape.len() > new_shape.len() {
-            return Some(View::new(new_shape, None, None, None));
+        if self.shape.contains(&0) {
+            assert!(new_shape.contains(&0), "cannot reshape 0 size to {new_shape:?}");
+            return Some(view!(new_shape));
+        }
+        //assert!(self.shape.iter().product::<isize>() == new_shape.iter().product::<isize>());
+        if new_shape.len() == 0 && self.mask.is_some() && c![0, for x in self.mask.as_ref().unwrap(), if x.0==x.1].len() > 0 {
+            return None
+        }
+        if self.contiguous {
+            return Some(view!(new_shape));
         }
 
         if self

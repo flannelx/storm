@@ -305,6 +305,7 @@ impl LazyBuffer {
     // }
 
     pub fn realize(&self) -> Self {
+        println!("Realizing LazyBuffer:{:?}", self);
         let mut ret = self.clone();
         if ret.is_realized() {
             return ret;
@@ -534,9 +535,6 @@ impl LazyBuffer {
     }
 
     pub fn expand(&self, arg: &[isize]) -> Self {
-        if arg == [1, 4, 3, 64, 3, 64] {
-            panic!()
-        }
         if &self.shape == arg {
             return self.clone();
         }
@@ -880,10 +878,7 @@ fn _realize_empty(buffer: &LazyBuffer) {
 fn _realize_rand(buffer: &LazyBuffer) {
     let mut buffer = buffer.clone();
     let numel = buffer.shape.iter().product::<isize>() as usize;
-    let mut on_cpu = Vec::with_capacity(numel);
-    for _ in 0..buffer.shape.iter().product::<isize>() as usize {
-        on_cpu.extend(gen_rand_num_bytes(&buffer.dtype));
-    }
+    let mut on_cpu = gen_rand_num_bytes(numel, &buffer.dtype);
     unsafe {
         let mut b = DEVICE.alloc(numel, buffer.dtype);
         Arc::get_mut_unchecked(&mut b).from_cpu(on_cpu);
@@ -909,20 +904,20 @@ fn _realize_contiguous(buffer: &LazyBuffer) {
 
 // Have to do this because the lack of num trait in Rust.
 // num_traits's traits are not object safe.
-fn gen_rand_num_bytes(dtype: &Dtype) -> Vec<u8> {
+fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
     let mut rng = rand::thread_rng();
     return match dtype.type_name {
-        "float16" => rng.gen::<f16>().to_le_bytes().to_vec(),
-        "float32" => rng.gen::<f32>().to_le_bytes().to_vec(),
-        "float64" => rng.gen::<f64>().to_le_bytes().to_vec(),
-        "uint8" => rng.gen::<u8>().to_le_bytes().to_vec(),
-        "uint16" => rng.gen::<u16>().to_le_bytes().to_vec(),
-        "uint32" => rng.gen::<u32>().to_le_bytes().to_vec(),
-        "uint64" => rng.gen::<u64>().to_le_bytes().to_vec(),
-        "int8" => rng.gen::<i8>().to_le_bytes().to_vec(),
-        "int16" => rng.gen::<i16>().to_le_bytes().to_vec(),
-        "int32" => rng.gen::<i32>().to_le_bytes().to_vec(),
-        "int64" => rng.gen::<i64>().to_le_bytes().to_vec(),
+        "float16" => (0..size).map(|_| rng.gen::<f16>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "float32" => (0..size).map(|_| rng.gen::<f32>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "float64" => (0..size).map(|_| rng.gen::<f64>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "uint8" =>   (0..size).map(|_| rng.gen::<u8>().to_le_bytes().to_vec() ).collect::<Vec<Vec<u8>>>().concat(),
+        "uint16" =>  (0..size).map(|_| rng.gen::<u16>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "uint32" =>  (0..size).map(|_| rng.gen::<u32>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "uint64" =>  (0..size).map(|_| rng.gen::<u64>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "int8" =>    (0..size).map(|_| rng.gen::<i8>().to_le_bytes().to_vec() ).collect::<Vec<Vec<u8>>>().concat(),
+        "int16" =>   (0..size).map(|_| rng.gen::<i16>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "int32" =>   (0..size).map(|_| rng.gen::<i32>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
+        "int64" =>   (0..size).map(|_| rng.gen::<i64>().to_le_bytes().to_vec()).collect::<Vec<Vec<u8>>>().concat(),
         t => panic!("unable gen type t={t}"),
     };
 }

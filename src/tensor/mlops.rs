@@ -762,12 +762,22 @@ impl Function for Mul {
 
     fn backward(&mut self, grad: LazyBuffer) -> Grad {
         let x = if self.need_input_grad[0] {
-            Some(self.y.as_ref().unwrap().e(Binary::Mul, &[grad.clone()], None))
+            Some(
+                self.y
+                    .as_ref()
+                    .unwrap()
+                    .e(Binary::Mul, &[grad.clone()], None),
+            )
         } else {
             None
         };
         let y = if self.need_input_grad[1] {
-            Some(self.x.as_ref().unwrap().e(Binary::Mul, &[grad.clone()], None))
+            Some(
+                self.x
+                    .as_ref()
+                    .unwrap()
+                    .e(Binary::Mul, &[grad.clone()], None),
+            )
         } else {
             None
         };
@@ -1063,10 +1073,14 @@ impl Function for Expand {
     }
 
     fn backward(&mut self, grad: LazyBuffer) -> Grad {
-        Grad::One(grad.r(
-            Reduce::Sum,
-            self.input_shape.as_ref().expect("Expand bwd expects a input shape"),
-        ))
+        Grad::One(
+            grad.r(
+                Reduce::Sum,
+                self.input_shape
+                    .as_ref()
+                    .expect("Expand bwd expects a input shape"),
+            ),
+        )
     }
 
     fn parents_mut(&mut self) -> &mut Ctx {
@@ -1205,11 +1219,7 @@ impl Function for Pad {
         let flatten_p = shape.unwrap();
         let mut narg = Vec::new();
         let mut arg = Vec::new();
-        for (sh, p) in x
-            .shape
-            .iter()
-            .zip(flatten_p.windows(2).step_by(2))
-        {
+        for (sh, p) in x.shape.iter().zip(flatten_p.windows(2).step_by(2)) {
             narg.push(vec![p[0], sh + p[0]]);
             arg.push(vec![p[0], p[1]]);
         }
@@ -1230,7 +1240,7 @@ impl Function for Pad {
             grad.shrink(
                 self.narg
                     .as_ref()
-                    .expect("Reshape backward should already have a shape")
+                    .expect("Reshape backward should already have a shape"),
             ),
         )
     }
@@ -1271,11 +1281,7 @@ impl Function for Shrink {
         let flatten_p = shape.unwrap();
         let mut narg = Vec::new();
         let mut padding = Vec::new();
-        for (sh, p) in x
-            .shape
-            .iter()
-            .zip(flatten_p.windows(2).step_by(2))
-        {
+        for (sh, p) in x.shape.iter().zip(flatten_p.windows(2).step_by(2)) {
             narg.push(vec![p[0], sh - p[1]]);
             padding.push(vec![p[0], p[1]]);
         }
@@ -1290,7 +1296,7 @@ impl Function for Shrink {
             grad.pad(
                 self.narg
                     .as_ref()
-                    .expect("Reshape backward should already have a shape")
+                    .expect("Reshape backward should already have a shape"),
             ),
         )
     }
