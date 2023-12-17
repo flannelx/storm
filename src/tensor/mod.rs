@@ -6,8 +6,8 @@ use num_traits::One;
 use num_traits::Zero;
 
 use crate::arg::Arg;
-use crate::dtype::NumType;
 use crate::dtype::type_to_dtype;
+use crate::dtype::NumType;
 use crate::ops::Load;
 use crate::ops::OpType;
 use crate::prelude::*;
@@ -87,11 +87,23 @@ impl Tensor {
         Contiguous::default().apply(self, None, None, None, None)
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
-        println!("currently to_vec outputs a bytes vec");
-        let ret = self.buffer.to_cpu(); // this is aysnc;
+    pub fn to_vec<T: NumType>(&self) -> Vec<T> {
+        assert!(
+            std::any::type_name::<T>().split("::").last().unwrap() == self.dtype(),
+            "cannot return Tensor<{}> to Vec<{}>",
+            self.dtype(),
+            std::any::type_name::<T>().split("::").last().unwrap()
+        );
+        let mut ret = self.buffer.to_cpu(); // this should be aysnc;
         DEVICE.synchronize();
-        ret
+        let ret_ptr = ret.as_mut_ptr() as *mut T;
+        let len = ret.len();
+        let size = std::mem::size_of::<T>();
+        unsafe {
+            let ret_t = Vec::from_raw_parts(ret.as_mut_ptr() as *mut T, len / size, len / size);
+            std::mem::forget(ret);
+            ret_t
+        }
     }
 
     // ------------ Load
@@ -258,11 +270,7 @@ impl Tensor {
         Shrink::default().apply(self, None, None, Some(flatten_p), None)
     }
 
-    pub fn pad<A: Into<Vec<(usize, usize)>>>(
-        &self,
-        arg: A,
-        const_value: impl NumType,
-    ) -> Self {
+    pub fn pad<A: Into<Vec<(usize, usize)>>>(&self, arg: A, const_value: impl NumType) -> Self {
         let flatten_p: Vec<isize> = arg
             .into()
             .iter()
@@ -285,11 +293,7 @@ impl Tensor {
         // }
     }
 
-    pub fn pad2d<P: Into<Vec<usize>>>(
-        &self,
-        padding: P,
-        const_value: impl NumType,
-    ) -> Self {
+    pub fn pad2d<P: Into<Vec<usize>>>(&self, padding: P, const_value: impl NumType) -> Self {
         let padding = padding.into();
         let slc: Vec<(isize, isize)> = padding
             .iter()
@@ -680,11 +684,7 @@ impl Tensor {
         xup
     }
 
-    pub fn slice<A: Into<Vec<(isize, isize)>>>(
-        &self,
-        arg: A,
-        const_value: impl NumType,
-    ) -> Self {
+    pub fn slice<A: Into<Vec<(isize, isize)>>>(&self, arg: A, const_value: impl NumType) -> Self {
         let arg = arg.into();
         let self_shape = self.shape();
         let padding: Vec<(usize, usize)> = arg

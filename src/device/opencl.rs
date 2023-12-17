@@ -134,10 +134,7 @@ impl Device for CLDevice {
 
     fn synchronize(&self) {
         opencl3::command_queue::finish(self.queue.get()).expect("Queue finish failed");
-        let mut p_lock = PENDING_COPY.lock().unwrap();
-        while let Some(mem) = p_lock.0.pop() {
-            unsafe { std::ptr::drop_in_place(mem) }
-        }
+        PENDING_COPY.lock().unwrap().0.clear();
     }
 
     fn copyout(&self, src: &dyn Buffer, dst: *mut u8) {
@@ -158,7 +155,6 @@ impl Device for CLDevice {
 
     fn copyin(&self, mut src: Vec<u8>, dst: &mut dyn Buffer) {
         unsafe {
-            PENDING_COPY.lock().unwrap().0.push(src.as_mut_ptr());
             opencl3::command_queue::enqueue_write_buffer(
                 self.queue.get(),
                 dst.ptr(),
@@ -170,7 +166,7 @@ impl Device for CLDevice {
                 core::ptr::null(),
             )
             .expect("copyin failed");
-            std::mem::forget(src);
+            PENDING_COPY.lock().unwrap().0.push(src);
         }
     }
 }
