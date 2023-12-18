@@ -1,8 +1,45 @@
+use std::hash::Hash;
+
+use crate::prelude::*;
 use crate::{
     dtype,
-    lazy::LazyBuffer,
-    ops::{LazyOp, OpType},
+    lazy::{LOArc, LazyBuffer},
+    ops::{LazyOp, OpType, DEVICE},
+    shape::ShapeTracker,
 };
+
+// @dataclass(frozen=True)
+// class MemBuffer:
+//   idx: int
+//   dtype: DType
+//   st: ShapeTracker
+//
+// @dataclass(frozen=True)
+// class ConstBuffer:
+//   val: Union[int, float]
+//   dtype: DType
+//   st: ShapeTracker
+//
+// @dataclass(frozen=True)
+// class ScheduleItem:
+//   ast: LazyOp
+//   out: LazyBuffer
+//   inputs: Tuple[LazyBuffer, ...]
+//   var_vals: Dict[Variable, int]
+
+#[derive(Debug)]
+pub struct MemBuffer {
+    pub idx: usize,
+    pub dtype: dtype::Dtype,
+    pub st: ShapeTracker,
+}
+
+#[derive(Debug)]
+pub struct ConstBuffer {
+    pub val: String,
+    pub dtype: dtype::Dtype,
+    pub st: ShapeTracker,
+}
 
 pub struct LocalBuffer {
     pub name: String,
@@ -31,33 +68,20 @@ pub struct Kenrel {
     ast: LazyOp,
     opts: LinearizerOptions,
     bufs: Vec<LazyBuffer>,
-    reduceop: Option<LazyOp>
+    reduceop: Option<LazyOp>,
 }
 
 #[allow(unused_variables)]
 impl Kenrel {
-    pub fn new(ast: &LazyOp, output_buffer: &LazyBuffer, opts: LinearizerOptions) -> Self {
+    pub fn new(ast: LazyOp, opts: Option<LinearizerOptions>) -> Self {
         // let ast = if ast.optype == Movement::Reshape {
         //     ast.src[0].clone().to_lo()
         // } else {
         //     ast.clone()
         // };
-
-        let mut reduceops = ast
-            .get_lazyops()
-            .into_iter()
-            .filter(|x| matches!(x.optype, OpType::Reduce(_)))
-            .collect::<Vec<LazyOp>>();
-        let reduceop = if reduceops.is_empty() {
-            None
-        } else {
-            Some(reduceops.swap_remove(0))
-        };
-
-        let mut bufs = vec![output_buffer.clone()];
-        let mut tmp = ast.buffers.clone();
-        tmp.dedup();
-        bufs.extend(tmp);
+        //assert!(matches!(ast.optype, BufferOps))
+        let opts = opts.unwrap_or(DEVICE.linearizer_opts());
+        let reduceop = c![x, for x in ast.get_lazyops(), if matches!(x.optype, OpType::Reduce(_))];
         todo!()
     }
 }

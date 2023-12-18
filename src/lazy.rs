@@ -22,7 +22,7 @@ pub(crate) fn lb_id() -> LazyBufferId {
 unsafe impl Send for LazyBuffer {}
 unsafe impl Sync for LazyBuffer {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct LOArc(Arc<LazyOp>);
 
 impl From<LazyOp> for LOArc {
@@ -328,6 +328,7 @@ impl LazyBuffer {
         if !ret.is_realized() {
             for x in ret.lazyop.buffers.iter_mut() {
                 x.realize();
+                //println!("XXX Realizing LazyBuffer:{:?}", x);
             }
             //todo!("device exec ast");
         }

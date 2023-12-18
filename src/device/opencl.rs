@@ -132,11 +132,6 @@ impl Device for CLDevice {
         })
     }
 
-    fn synchronize(&self) {
-        opencl3::command_queue::finish(self.queue.get()).expect("Queue finish failed");
-        PENDING_COPY.lock().unwrap().0.clear();
-    }
-
     fn copyout(&self, src: &dyn Buffer, dst: *mut u8) {
         unsafe {
             opencl3::command_queue::enqueue_read_buffer(
@@ -168,5 +163,14 @@ impl Device for CLDevice {
             .expect("copyin failed");
             PENDING_COPY.lock().unwrap().0.push(src);
         }
+    }
+
+    fn synchronize(&self) {
+        opencl3::command_queue::finish(self.queue.get()).expect("Queue finish failed");
+        PENDING_COPY.lock().unwrap().0.clear();
+    }
+
+    fn linearizer_opts(&self) -> crate::codegen::kernel::LinearizerOptions {
+        todo!()
     }
 }

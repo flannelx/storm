@@ -206,7 +206,7 @@ optype_impl!(Movement);
 optype_impl!(Load);
 optype_impl!(Buffer);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum LazyOpSrc {
     LazyOp(LOArc),
     LazyBuffer(LazyBuffer),
@@ -268,7 +268,7 @@ impl LazyOpSrc {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct LazyOp {
     pub optype: OpType,
     pub src: Vec<LazyOpSrc>,
