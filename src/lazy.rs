@@ -328,9 +328,9 @@ impl LazyBuffer {
         if !ret.is_realized() {
             for x in ret.lazyop.buffers.iter_mut() {
                 x.realize();
-                //println!("XXX Realizing LazyBuffer:{:?}", x);
+                println!("XXX Realizing LazyBuffer:{:?}", x);
             }
-            //todo!("device exec ast");
+            todo!("device exec ast");
         }
         //println!("3 ret {:?}", ret);
         ret
@@ -342,7 +342,7 @@ impl LazyBuffer {
         _push_movement_ops(&srcs.iter().map(|s| s).collect::<Vec<&Self>>());
         let out_device = srcs[0].device.clone();
         let out_shape = srcs[0].shape.clone();
-        let out_dtype = c![s, for s in srcs.iter()]
+        let out_dtype = v![s, for s in srcs.iter()]
             .iter()
             .max_by(|x, y| x.dtype.size.cmp(&y.dtype.size))
             .unwrap()
@@ -912,14 +912,14 @@ fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
         "f16" => { let mut ret = (0..size).map(|_| rng.gen::<f16>()).collect::<Vec<f16>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
         "f32" => { let mut ret = (0..size).map(|_| rng.gen::<f32>()).collect::<Vec<f32>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
         "f64" => { let mut ret = (0..size).map(|_| rng.gen::<f64>()).collect::<Vec<f64>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "u8"   => { let mut ret = (0..size).map(|_| rng.gen::<u8>()) .collect::<Vec<u8>>() ; let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "u16"  => { let mut ret = (0..size).map(|_| rng.gen::<u16>()).collect::<Vec<u16>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "u32"  => { let mut ret = (0..size).map(|_| rng.gen::<u32>()).collect::<Vec<u32>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "u64"  => { let mut ret = (0..size).map(|_| rng.gen::<u64>()).collect::<Vec<u64>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "i8"    => { let mut ret = (0..size).map(|_| rng.gen::<i8>()) .collect::<Vec<i8>>() ; let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "i16"   => { let mut ret = (0..size).map(|_| rng.gen::<i16>()).collect::<Vec<i16>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "i32"   => { let mut ret = (0..size).map(|_| rng.gen::<i32>()).collect::<Vec<i32>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
-        "i64"   => { let mut ret = (0..size).map(|_| rng.gen::<i64>()).collect::<Vec<i64>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "u8"  => { let mut ret = (0..size).map(|_| rng.gen::< u8>()).collect::<Vec< u8>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "u16" => { let mut ret = (0..size).map(|_| rng.gen::<u16>()).collect::<Vec<u16>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "u32" => { let mut ret = (0..size).map(|_| rng.gen::<u32>()).collect::<Vec<u32>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "u64" => { let mut ret = (0..size).map(|_| rng.gen::<u64>()).collect::<Vec<u64>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "i8"  => { let mut ret = (0..size).map(|_| rng.gen::< i8>()).collect::<Vec< i8>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "i16" => { let mut ret = (0..size).map(|_| rng.gen::<i16>()).collect::<Vec<i16>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "i32" => { let mut ret = (0..size).map(|_| rng.gen::<i32>()).collect::<Vec<i32>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
+        "i64" => { let mut ret = (0..size).map(|_| rng.gen::<i64>()).collect::<Vec<i64>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
         t => panic!("unable gen type t={t}"),
     };
     unsafe { Vec::<u8>::from_raw_parts(ptr, size * dtype.size, size * dtype.size)}

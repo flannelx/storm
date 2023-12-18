@@ -1,8 +1,7 @@
 use storm::prelude::*;
-use num_traits::ToPrimitive;
 
 fn main() {
-    let a = Tensor::<f16>::rand([1_000_000]);
-    let out = a.realize().to_vec();
+    let a = Tensor::<f32>::rand([1_000]) - 1.;
+    let out = a.to_vec();
     println!("{out:?}");
 }

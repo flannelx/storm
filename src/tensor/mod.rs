@@ -430,12 +430,12 @@ impl<T: NumType> Tensor<T> {
         } else {
             (0..self.shape().len()).map(|i| i as isize).collect()
         };
-        let axis_ = c![if x >= 0 { x } else { x + self.shape().len() as isize }, for x in axis_];
-        let shape = c![s, for (i, s) in self.shape().dims.iter().enumerate(), if !axis_.contains(&(i as isize))];
+        let axis_ = v![if x >= 0 { x } else { x + self.shape().len() as isize }, for x in axis_];
+        let shape = v![s, for (i, s) in self.shape().dims.iter().enumerate(), if !axis_.contains(&(i as isize))];
         if self.shape().dims.contains(&0) && !shape.contains(&0) {
             let fxn_name = std::any::type_name::<F>().split("::").last().unwrap();
             return Self::full(
-                c![if s == 0 { 1 } else { s }, for s in self.shape().dims],
+                v![if s == 0 { 1 } else { s }, for s in self.shape().dims],
                 T::from_f32(if fxn_name == "Sum" {
                     0.0
                 } else {
@@ -444,7 +444,7 @@ impl<T: NumType> Tensor<T> {
                 .unwrap(),
             );
         }
-        let new_shape = c![if axis_.contains(&(i as isize)) { 1 } else { *s }, for (i, s) in self.shape().dims.iter().enumerate()];
+        let new_shape = v![if axis_.contains(&(i as isize)) { 1 } else { *s }, for (i, s) in self.shape().dims.iter().enumerate()];
         let ret = fxn.apply(self, None, None, Some(new_shape), None);
         if keepdim {
             ret
@@ -500,15 +500,15 @@ impl<T: NumType> Tensor<T> {
         let m = self._eq(&self.max_keepdim(axis));
         let idx = m * Self::_arange(self.shape()[axis as usize] as f32 - 1., -1., -1.).reshape(
             [
-                vec![self.shape()[axis as usize]],
+                vec![self.shape()[axis]],
                 vec![1; self.ndim() - axis as usize - 1],
             ]
             .concat(),
         );
         if keepdim {
-            return self.shape()[axis as usize] - idx.max_keepdim(axis) - 1;
+            return self.shape()[axis] - idx.max_keepdim(axis) - 1;
         }
-        self.shape()[axis as usize] - idx.max(axis) - 1
+        self.shape()[axis] - idx.max(axis) - 1
     }
 
     pub fn argmax(&self, axis: isize) -> Self {
@@ -647,7 +647,7 @@ impl<T: NumType> Tensor<T> {
             .map(|sh| *sh)
             .collect();
         let xup = if k_.iter().zip(s_.iter()).any(|(k, s)| k > s) || d_.iter().any(|d| *d != 1) {
-            let o_ = c![(i - d * (k - 1) - 1) / s + 1, for (i, d, k, s) in izip!(i_.iter(), d_.iter(), k_.iter(), s_.iter())];
+            let o_ = v![(i - d * (k - 1) - 1) / s + 1, for (i, d, k, s) in izip!(i_.iter(), d_.iter(), k_.iter(), s_.iter())];
             let e_: Vec<isize> = k_
                 .iter()
                 .zip(i_.iter().zip(d_.iter()))
@@ -656,18 +656,18 @@ impl<T: NumType> Tensor<T> {
             self.reshape([prefix.clone(), i_.iter().flat_map(|i| [1, *i]).collect()].concat())
                 .expand([prefix.clone(), e_.iter().zip(i_.iter()).flat_map(|(e, i)| [*e, *i]).collect()].concat())
                 .reshape([prefix.clone(), e_.iter().zip(i_.iter()).map(|(e, i)| *e * *i).collect()].concat())
-                .slice(vec![slc_prefix.clone(), c![(0, k*(i+d)), for (k, i, d) in izip!(k_.iter(), i_.iter(), d_.iter())]].concat(), 0)
-                .reshape(vec![prefix.clone(), c![[*k, i + d], for (k, i, d) in izip!(k_.iter(), i_.iter(), d_.iter())].concat()].concat())
-                .slice(vec![slc_prefix.clone(), c![[(0, *k),(0, o * s)], for (k, o, s) in izip!(k_.iter(), o_.iter(), s_.iter())].concat()].concat(), 0)
-                .reshape(vec![prefix.clone(), c![[k, o, s], for (&k, &o, &s) in izip!(k_.iter(), o_.iter(), s_.iter())].concat()].concat())
-                .slice(vec![slc_prefix.clone(), c![[(0, *k), (0, *o), (0, 1)], for (k, o) in izip!(k_.iter(), o_.iter())].concat()].concat(), 0)
-                .reshape(vec![prefix.clone(), c![[k, o], for (&k, &o) in izip!(k_.iter(), o_.iter())].concat()].concat())
-                .permute(vec![c![i, for i in 0..prefix.len()], c![prefix.len() + i * 2 + 1, for i in 0..k_.len()], c![prefix.len() + i * 2, for i in 0..k_.len()]].concat())
+                .slice(vec![slc_prefix.clone(), v![(0, k*(i+d)), for (k, i, d) in izip!(k_.iter(), i_.iter(), d_.iter())]].concat(), 0)
+                .reshape(vec![prefix.clone(), v![[*k, i + d], for (k, i, d) in izip!(k_.iter(), i_.iter(), d_.iter())].concat()].concat())
+                .slice(vec![slc_prefix.clone(), v![[(0, *k),(0, o * s)], for (k, o, s) in izip!(k_.iter(), o_.iter(), s_.iter())].concat()].concat(), 0)
+                .reshape(vec![prefix.clone(), v![[k, o, s], for (&k, &o, &s) in izip!(k_.iter(), o_.iter(), s_.iter())].concat()].concat())
+                .slice(vec![slc_prefix.clone(), v![[(0, *k), (0, *o), (0, 1)], for (k, o) in izip!(k_.iter(), o_.iter())].concat()].concat(), 0)
+                .reshape(vec![prefix.clone(), v![[k, o], for (&k, &o) in izip!(k_.iter(), o_.iter())].concat()].concat())
+                .permute(vec![v![i, for i in 0..prefix.len()], v![prefix.len() + i * 2 + 1, for i in 0..k_.len()], v![prefix.len() + i * 2, for i in 0..k_.len()]].concat())
         } else {
-            let o_ = c![(i+(s-k))/s, for (i, s, k) in izip!(i_.iter(), s_.iter(), k_.iter())];
-            let mut xup = self.slice(vec![slc_prefix.clone(), c![(0, o * s), for (&o, &s) in izip!(o_.iter(), s_.iter())]].concat(), 0);
-            xup = xup.reshape(vec![prefix.clone(), c![[o, s], for (&o, &s) in izip!(o_.iter(), s_.iter())].concat()].concat());
-            xup = xup.slice(vec![slc_prefix.clone(), c![[(0, o), (0, k)], for (&o, &k) in izip!(o_.iter(), k_.iter())].concat()].concat(), 0);
+            let o_ = v![(i+(s-k))/s, for (i, s, k) in izip!(i_.iter(), s_.iter(), k_.iter())];
+            let mut xup = self.slice(vec![slc_prefix.clone(), v![(0, o * s), for (&o, &s) in izip!(o_.iter(), s_.iter())]].concat(), 0);
+            xup = xup.reshape(vec![prefix.clone(), v![[o, s], for (&o, &s) in izip!(o_.iter(), s_.iter())].concat()].concat());
+            xup = xup.slice(vec![slc_prefix.clone(), v![[(0, o), (0, k)], for (&o, &k) in izip!(o_.iter(), k_.iter())].concat()].concat(), 0);
 
             let mut tmp: Vec<usize> = (0..prefix.len()).into_iter().collect();
             tmp.extend((0..k_.len()).map(|i| prefix.len() + i * 2));
@@ -791,7 +791,7 @@ impl<T: NumType> Tensor<T> {
         w_rsh_tmp.push(cin);
         w_rsh_tmp.extend(hw.iter());
         let mut ret = x * weight.reshape(w_rsh_tmp);
-        ret._sum(c![-1-(i as isize), for i in 0..1+oyx.len()], true)
+        ret._sum(v![-1-(i as isize), for i in 0..1+oyx.len()], true)
             .reshape(vec![vec![bs, cout], oyx.clone()].concat());
         let mut ret_rsh_tmp = vec![bs, cout];
         ret_rsh_tmp.extend(oyx.iter());

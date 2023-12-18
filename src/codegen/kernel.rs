@@ -81,7 +81,7 @@ impl Kenrel {
         // };
         //assert!(matches!(ast.optype, BufferOps))
         let opts = opts.unwrap_or(DEVICE.linearizer_opts());
-        let reduceop = c![x, for x in ast.get_lazyops(), if matches!(x.optype, OpType::Reduce(_))];
+        let reduceop = v![x, for x in ast.get_lazyops(), if matches!(x.optype, OpType::Reduce(_))];
         todo!()
     }
 }
