@@ -1,6 +1,7 @@
 #![allow(unused_variables, dead_code)]
 
 use crate::{
+    dtype::NumType,
     ops::{Binary, Reduce, Ternary, Unary},
     prelude::*,
     tensor::TensorId,
@@ -26,35 +27,35 @@ pub fn shape_to_axis(old_shape: &[isize], new_shape: &[isize]) -> Vec<usize> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Ctx(pub(crate) Vec<Tensor>);
+pub struct Ctx<T: NumType>(pub(crate) Vec<Tensor<T>>);
 
-impl Default for Ctx {
+impl<T: NumType> Default for Ctx<T> {
     fn default() -> Self {
         Self(Vec::new())
     }
 }
 
-impl Ctx {
+impl<T: NumType> Ctx<T> {
     fn contains(&self, id: TensorId) -> bool {
         self.iter().any(|t| t.id == id)
     }
 }
 
-impl core::ops::Deref for Ctx {
-    type Target = Vec<Tensor>;
+impl<T: NumType> core::ops::Deref for Ctx<T> {
+    type Target = Vec<Tensor<T>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl core::ops::DerefMut for Ctx {
+impl<T: NumType> core::ops::DerefMut for Ctx<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-pub trait Function: DynClone + core::fmt::Debug {
+pub trait Function<T: NumType>: DynClone + core::fmt::Debug {
     fn type_name(&self) -> String {
         let full_name = std::any::type_name::<Self>().to_string();
         let splited: Vec<&str> = full_name.split(&['<', '>'][..]).collect();
@@ -77,16 +78,16 @@ pub trait Function: DynClone + core::fmt::Debug {
         const_: Option<Vec<u8>>,
     ) -> LazyBuffer;
     fn backward(&mut self, grad: LazyBuffer) -> Grad;
-    fn parents_mut(&mut self) -> &mut Ctx;
-    fn parents_ref(&self) -> &Ctx;
+    fn parents_mut(&mut self) -> &mut Ctx<T>;
+    fn parents_ref(&self) -> &Ctx<T>;
     fn apply(
         &mut self,
-        x: &Tensor,
-        y: Option<&Tensor>,
-        z: Option<&Tensor>,
+        x: &Tensor<T>,
+        y: Option<&Tensor<T>>,
+        z: Option<&Tensor<T>>,
         shape: Option<Vec<isize>>,
         const_: Option<Vec<u8>>,
-    ) -> Tensor
+    ) -> Tensor<T>
     where
         Self: 'static + Sized,
     {
@@ -132,7 +133,7 @@ pub trait Function: DynClone + core::fmt::Debug {
     }
 }
 
-dyn_clone::clone_trait_object!(Function);
+dyn_clone::clone_trait_object!(<T> Function<T> where T: NumType);
 
 #[derive(Debug, Clone)]
 pub enum Grad {
@@ -140,7 +141,7 @@ pub enum Grad {
     Two(Option<LazyBuffer>, Option<LazyBuffer>),
 }
 
-// impl core::fmt::Debug for Grad {
+// impl<T: NumType> core::fmt::Debug for Grad {
 //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 //         match &self {
 //             Grad::Contiguous(x)
@@ -160,11 +161,11 @@ pub enum Grad {
 // }
 
 #[derive(Clone, Debug)]
-pub struct Contiguous {
-    pub(crate) ctx: Ctx,
+pub struct Contiguous<T: NumType> {
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Contiguous {
+impl<T: NumType> Default for Contiguous<T> {
     fn default() -> Self {
         Self {
             ctx: Ctx::default(),
@@ -172,7 +173,7 @@ impl Default for Contiguous {
     }
 }
 
-impl Function for Contiguous {
+impl<T: NumType> Function<T> for Contiguous<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -188,11 +189,11 @@ impl Function for Contiguous {
         Grad::One(grad)
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         todo!()
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         todo!()
     }
     // fn forward(
@@ -210,22 +211,22 @@ impl Function for Contiguous {
     //     Grad::One(grad)
     // }
     //
-    // fn parents_mut(&mut self) -> &mut Ctx {
+    // fn parents_mut(&mut self) -> &mut Ctx<T> {
     //     &mut self.ctx
     // }
     //
-    // fn parents_ref(&self) -> &Ctx {
+    // fn parents_ref(&self) -> &Ctx<T> {
     //     &self.ctx
     // }
 }
 
 #[derive(Clone, Debug)]
-pub struct Sin {
+pub struct Sin<T: NumType> {
     pub(crate) x: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Sin {
+impl<T: NumType> Default for Sin<T> {
     fn default() -> Self {
         Self {
             x: None,
@@ -234,7 +235,7 @@ impl Default for Sin {
     }
 }
 
-impl Function for Sin {
+impl<T: NumType> Function<T> for Sin<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -257,22 +258,22 @@ impl Function for Sin {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Log {
+pub struct Log<T: NumType> {
     pub(crate) x: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Log {
+impl<T: NumType> Default for Log<T> {
     fn default() -> Self {
         Self {
             x: None,
@@ -281,7 +282,7 @@ impl Default for Log {
     }
 }
 
-impl Function for Log {
+impl<T: NumType> Function<T> for Log<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -302,22 +303,22 @@ impl Function for Log {
         Grad::One(grad.e(Binary::Div, &[self.x.as_ref().unwrap().clone()], None))
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Exp {
+pub struct Exp<T: NumType> {
     pub(crate) ret: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Exp {
+impl<T: NumType> Default for Exp<T> {
     fn default() -> Self {
         Self {
             ret: None,
@@ -326,7 +327,7 @@ impl Default for Exp {
     }
 }
 
-impl Function for Exp {
+impl<T: NumType> Function<T> for Exp<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -350,22 +351,22 @@ impl Function for Exp {
         Grad::One(self.ret.as_ref().unwrap().e(Binary::Mul, &[grad], None))
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Sqrt {
+pub struct Sqrt<T: NumType> {
     pub(crate) ret: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Sqrt {
+impl<T: NumType> Default for Sqrt<T> {
     fn default() -> Self {
         Self {
             ret: None,
@@ -374,7 +375,7 @@ impl Default for Sqrt {
     }
 }
 
-impl Function for Sqrt {
+impl<T: NumType> Function<T> for Sqrt<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -396,22 +397,21 @@ impl Function for Sqrt {
         ))
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
-//FIXME: Both Sum/Max reduce op is using a hack on shape param in forward.
 #[derive(Clone, Debug)]
-pub struct Sum {
+pub struct Sum<T: NumType> {
     pub(crate) input_shape: Option<Vec<isize>>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Sum {
+impl<T: NumType> Default for Sum<T> {
     fn default() -> Self {
         Self {
             input_shape: None,
@@ -420,7 +420,7 @@ impl Default for Sum {
     }
 }
 
-impl Function for Sum {
+impl<T: NumType> Function<T> for Sum<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -468,23 +468,23 @@ impl Function for Sum {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Max {
+pub struct Max<T: NumType> {
     pub(crate) x: Option<LazyBuffer>,
     pub(crate) ret: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Max {
+impl<T: NumType> Default for Max<T> {
     fn default() -> Self {
         Self {
             x: None,
@@ -494,7 +494,7 @@ impl Default for Max {
     }
 }
 
-impl Function for Max {
+impl<T: NumType> Function<T> for Max<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -556,21 +556,21 @@ impl Function for Max {
         ))
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Less {
-    pub(crate) ctx: Ctx,
+pub struct Less<T: NumType> {
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Less {
+impl<T: NumType> Default for Less<T> {
     fn default() -> Self {
         Self {
             ctx: Ctx::default(),
@@ -578,7 +578,7 @@ impl Default for Less {
     }
 }
 
-impl Function for Less {
+impl<T: NumType> Function<T> for Less<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -598,24 +598,24 @@ impl Function for Less {
         unreachable!("Less op can not do backward pass")
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Add {
+pub struct Add<T: NumType> {
     pub(crate) need_input_grad: [bool; 2],
     pub(crate) x: Option<LazyBuffer>,
     pub(crate) y: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Add {
+impl<T: NumType> Default for Add<T> {
     fn default() -> Self {
         Self {
             need_input_grad: [false, false],
@@ -626,7 +626,7 @@ impl Default for Add {
     }
 }
 
-impl Function for Add {
+impl<T: NumType> Function<T> for Add<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -656,24 +656,24 @@ impl Function for Add {
         Grad::Two(x, y)
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Sub {
+pub struct Sub<T: NumType> {
     pub(crate) need_input_grad: [bool; 2],
     pub(crate) x: Option<LazyBuffer>,
     pub(crate) y: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Sub {
+impl<T: NumType> Default for Sub<T> {
     fn default() -> Self {
         Self {
             need_input_grad: [false, false],
@@ -684,7 +684,7 @@ impl Default for Sub {
     }
 }
 
-impl Function for Sub {
+impl<T: NumType> Function<T> for Sub<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -714,24 +714,24 @@ impl Function for Sub {
         Grad::Two(x, y)
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Mul {
+pub struct Mul<T: NumType> {
     pub(crate) need_input_grad: [bool; 2],
     pub(crate) x: Option<LazyBuffer>,
     pub(crate) y: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Mul {
+impl<T: NumType> Default for Mul<T> {
     fn default() -> Self {
         Self {
             need_input_grad: [false, false],
@@ -742,7 +742,7 @@ impl Default for Mul {
     }
 }
 
-impl Function for Mul {
+impl<T: NumType> Function<T> for Mul<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -784,24 +784,24 @@ impl Function for Mul {
         Grad::Two(x, y)
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Div {
+pub struct Div<T: NumType> {
     pub(crate) need_input_grad: [bool; 2],
     pub(crate) x: Option<LazyBuffer>,
     pub(crate) y: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Div {
+impl<T: NumType> Default for Div<T> {
     fn default() -> Self {
         Self {
             need_input_grad: [false, false],
@@ -812,7 +812,7 @@ impl Default for Div {
     }
 }
 
-impl Function for Div {
+impl<T: NumType> Function<T> for Div<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -853,22 +853,22 @@ impl Function for Div {
         Grad::Two(x, y)
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Sigmoid {
+pub struct Sigmoid<T: NumType> {
     pub(crate) ret: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Sigmoid {
+impl<T: NumType> Default for Sigmoid<T> {
     fn default() -> Self {
         Self {
             ret: None,
@@ -877,7 +877,7 @@ impl Default for Sigmoid {
     }
 }
 
-impl Function for Sigmoid {
+impl<T: NumType> Function<T> for Sigmoid<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -922,22 +922,22 @@ impl Function for Sigmoid {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Relu {
+pub struct Relu<T: NumType> {
     pub(crate) ret: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Relu {
+impl<T: NumType> Default for Relu<T> {
     fn default() -> Self {
         Self {
             ret: None,
@@ -946,7 +946,7 @@ impl Default for Relu {
     }
 }
 
-impl Function for Relu {
+impl<T: NumType> Function<T> for Relu<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -970,23 +970,23 @@ impl Function for Relu {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 // --------------------------------- Tenary
 #[derive(Clone, Debug)]
-pub struct Where {
+pub struct Where<T: NumType> {
     pub(crate) x: Option<LazyBuffer>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
     pub(crate) need_input_grad: [bool; 3],
 }
 
-impl Default for Where {
+impl<T: NumType> Default for Where<T> {
     fn default() -> Self {
         Self {
             need_input_grad: [false, false, false],
@@ -996,7 +996,7 @@ impl Default for Where {
     }
 }
 
-impl Function for Where {
+impl<T: NumType> Function<T> for Where<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -1035,22 +1035,22 @@ impl Function for Where {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 // -------------------------------- Movement -------------------------------------
 #[derive(Clone, Debug)]
-pub struct Expand {
+pub struct Expand<T: NumType> {
     pub(crate) input_shape: Option<Vec<isize>>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Expand {
+impl<T: NumType> Default for Expand<T> {
     fn default() -> Self {
         Self {
             input_shape: None,
@@ -1059,7 +1059,7 @@ impl Default for Expand {
     }
 }
 
-impl Function for Expand {
+impl<T: NumType> Function<T> for Expand<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -1083,22 +1083,22 @@ impl Function for Expand {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Reshape {
+pub struct Reshape<T: NumType> {
     pub(crate) input_shape: Option<Vec<isize>>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Reshape {
+impl<T: NumType> Default for Reshape<T> {
     fn default() -> Self {
         Self {
             input_shape: None,
@@ -1107,7 +1107,7 @@ impl Default for Reshape {
     }
 }
 
-impl Function for Reshape {
+impl<T: NumType> Function<T> for Reshape<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -1130,22 +1130,22 @@ impl Function for Reshape {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Permute {
+pub struct Permute<T: NumType> {
     pub(crate) permute_order: Option<Vec<isize>>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Permute {
+impl<T: NumType> Default for Permute<T> {
     fn default() -> Self {
         Self {
             permute_order: None,
@@ -1154,7 +1154,7 @@ impl Default for Permute {
     }
 }
 
-impl Function for Permute {
+impl<T: NumType> Function<T> for Permute<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -1181,11 +1181,11 @@ impl Function for Permute {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
@@ -1193,12 +1193,12 @@ impl Function for Permute {
 //NOTE: Pad/Shrink stores in Vec<(usize, usize)>, so we flatten that into a vec<usize> when using
 //      this, such that we dont need a new param in this forwrad()
 #[derive(Clone, Debug)]
-pub struct Pad {
+pub struct Pad<T: NumType> {
     pub(crate) narg: Option<Vec<isize>>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Pad {
+impl<T: NumType> Default for Pad<T> {
     fn default() -> Self {
         Self {
             narg: None,
@@ -1207,7 +1207,7 @@ impl Default for Pad {
     }
 }
 
-impl Function for Pad {
+impl<T: NumType> Function<T> for Pad<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -1245,22 +1245,22 @@ impl Function for Pad {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Shrink {
+pub struct Shrink<T: NumType> {
     pub(crate) narg: Option<Vec<isize>>,
-    pub(crate) ctx: Ctx,
+    pub(crate) ctx: Ctx<T>,
 }
 
-impl Default for Shrink {
+impl<T: NumType> Default for Shrink<T> {
     fn default() -> Self {
         Self {
             narg: None,
@@ -1269,7 +1269,7 @@ impl Default for Shrink {
     }
 }
 
-impl Function for Shrink {
+impl<T: NumType> Function<T> for Shrink<T> {
     fn forward(
         &mut self,
         x: &LazyBuffer,
@@ -1301,11 +1301,11 @@ impl Function for Shrink {
         )
     }
 
-    fn parents_mut(&mut self) -> &mut Ctx {
+    fn parents_mut(&mut self) -> &mut Ctx<T> {
         &mut self.ctx
     }
 
-    fn parents_ref(&self) -> &Ctx {
+    fn parents_ref(&self) -> &Ctx<T> {
         &self.ctx
     }
 }

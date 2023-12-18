@@ -1,6 +1,6 @@
-use crate::prelude::*;
+use crate::{dtype::NumType, prelude::*};
 
-impl core::fmt::Debug for Tensor {
+impl<T: NumType> core::fmt::Debug for Tensor<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -18,7 +18,7 @@ impl core::fmt::Debug for Tensor {
     }
 }
 
-impl core::fmt::Display for Tensor {
+impl<T: NumType> core::fmt::Display for Tensor<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -34,22 +34,22 @@ impl core::fmt::Display for Tensor {
 
 macro_rules! core_impl {
     ($op:tt, $fn:tt) => {
-        impl core::ops::$op for Tensor {
-            type Output = Tensor;
+        impl<T: NumType> core::ops::$op for Tensor<T> {
+            type Output = Tensor<T>;
             fn $fn(self, rhs: Self) -> Self::Output {
                 Tensor::$fn(&self, &rhs)
             }
         }
 
-        impl core::ops::$op<&Tensor> for Tensor {
-            type Output = Tensor;
-            fn $fn(self, rhs: &Tensor) -> Self::Output {
+        impl<T: NumType> core::ops::$op<&Tensor<T>> for Tensor<T> {
+            type Output = Tensor<T>;
+            fn $fn(self, rhs: &Tensor<T>) -> Self::Output {
                 Tensor::$fn(&self, rhs)
             }
         }
 
-        impl core::ops::$op for &Tensor {
-            type Output = Tensor;
+        impl<T: NumType> core::ops::$op for &Tensor<T> {
+            type Output = Tensor<T>;
             fn $fn(self, rhs: Self) -> Self::Output {
                 Tensor::$fn(self, rhs)
             }
@@ -64,67 +64,66 @@ core_impl!(Div, div);
 
 macro_rules! core_impl_num {
     ($op:tt, $fn:tt, $t:ty, $from:ident) => {
-
-        impl core::ops::$op<$t> for Tensor {
-            type Output = Tensor;
+        impl<T: NumType> core::ops::$op<$t> for Tensor<T> {
+            type Output = Tensor<T>;
             fn $fn(self, rhs: $t) -> Self::Output {
-                let rhs = Tensor::_const(rhs);
+                let rhs = Tensor::_const(T::$from(rhs).unwrap());
                 Tensor::$fn(&self, &rhs)
             }
         }
 
-        impl core::ops::$op<$t> for &Tensor {
-            type Output = Tensor;
+        impl<T: NumType> core::ops::$op<$t> for &Tensor<T> {
+            type Output = Tensor<T>;
             fn $fn(self, rhs: $t) -> Self::Output {
-                let rhs = Tensor::_const(rhs);
+                let rhs = Tensor::_const(T::$from(rhs).unwrap());
                 Tensor::$fn(self, &rhs)
             }
         }
 
-        impl core::ops::$op<&$t> for Tensor {
-            type Output = Tensor;
+        impl<T: NumType> core::ops::$op<&$t> for Tensor<T> {
+            type Output = Tensor<T>;
             fn $fn(self, rhs: &$t) -> Self::Output {
-                let rhs = Tensor::_const(*rhs);
+                let rhs = Tensor::_const(T::$from(*rhs).unwrap());
                 Tensor::$fn(&self, &rhs)
             }
         }
 
-        impl core::ops::$op<&$t> for &Tensor {
-            type Output = Tensor;
+        impl<T: NumType> core::ops::$op<&$t> for &Tensor<T> {
+            type Output = Tensor<T>;
             fn $fn(self, rhs: &$t) -> Self::Output {
-                let rhs = Tensor::_const(*rhs);
+                let rhs = Tensor::_const(T::$from(*rhs).unwrap());
                 Tensor::$fn(&self, &rhs)
             }
         }
 
-        impl core::ops::$op<Tensor> for $t {
-            type Output = Tensor;
-            fn $fn(self, rhs: Tensor) -> Self::Output {
-                let lhs = Tensor::_const(self);
+        impl<T: NumType> core::ops::$op<Tensor<T>> for $t {
+            type Output = Tensor<T>;
+            fn $fn(self, rhs: Tensor<T>) -> Self::Output {
+                let lhs = Tensor::_const(T::$from(self).unwrap());
                 Tensor::$fn(&lhs, &rhs)
             }
         }
 
-        impl core::ops::$op<Tensor> for &$t {
-            type Output = Tensor;
-            fn $fn(self, rhs: Tensor) -> Self::Output {
-                let lhs = Tensor::_const(*self);
+        impl<T: NumType> core::ops::$op<Tensor<T>> for &$t {
+            type Output = Tensor<T>;
+            fn $fn(self, rhs: Tensor<T>) -> Self::Output {
+                let lhs = Tensor::_const(T::$from(*self).unwrap());
                 Tensor::$fn(&lhs, &rhs)
             }
         }
 
-        impl core::ops::$op<&Tensor> for $t {
-            type Output = Tensor;
-            fn $fn(self, rhs: &Tensor) -> Self::Output {
-                let lhs = Tensor::_const(self);
+        impl<T: NumType> core::ops::$op<&Tensor<T>> for $t {
+            type Output = Tensor<T>;
+            fn $fn(self, rhs: &Tensor<T>) -> Self::Output {
+                let lhs = Tensor::_const(T::$from(self).unwrap());
                 Tensor::$fn(&lhs, &rhs)
             }
         }
 
-        impl core::ops::$op<&Tensor> for &$t {
-            type Output = Tensor;
-            fn $fn(self, rhs: &Tensor) -> Self::Output {
-                let lhs = Tensor::_const(*self);
+        impl<T: NumType> core::ops::$op<&Tensor<T>> for &$t {
+            type Output = Tensor<T>;
+            fn $fn(self, rhs: &Tensor<T>) -> Self::Output {
+                let lhs = Tensor::_const(T::$from(*self).unwrap());
                 Tensor::$fn(&lhs, rhs)
             }
         }
@@ -151,16 +150,16 @@ core_impl_num!(Sub, sub, isize, from_isize);
 core_impl_num!(Mul, mul, isize, from_isize);
 core_impl_num!(Div, div, isize, from_isize);
 
-impl core::ops::Neg for Tensor {
-    type Output = Tensor;
+impl<T: NumType> core::ops::Neg for Tensor<T> {
+    type Output = Tensor<T>;
 
     fn neg(self) -> Self::Output {
         self * -1.0
     }
 }
 
-impl core::ops::Neg for &Tensor {
-    type Output = Tensor;
+impl<T: NumType> core::ops::Neg for &Tensor<T> {
+    type Output = Tensor<T>;
 
     fn neg(self) -> Self::Output {
         self * -1.0
