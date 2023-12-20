@@ -1,5 +1,7 @@
 #![allow(non_upper_case_globals)]
 
+use std::collections::{HashMap, HashSet};
+
 use half::{bf16, f16};
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
@@ -11,6 +13,18 @@ pub struct Dtype {
     pub shape: Option<Vec<isize>>,
     pub ptr: bool,
     pub type_name: &'static str,
+}
+
+impl PartialOrd for Dtype {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.size.cmp(&other.size))
+    }
+}
+
+impl Ord for Dtype {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.size.cmp(&other.size)
+    }
 }
 
 impl core::fmt::Display for Dtype {
@@ -371,3 +385,31 @@ NumTypeImpl!(f32);
 NumTypeImpl!(f64);
 NumTypeImpl!(f16);
 NumTypeImpl!(bf16);
+
+#[rustfmt::skip]
+lazy_static::lazy_static! {
+    pub static ref type_rules: HashMap<Dtype, HashSet<Dtype>> = HashMap::from([
+    (_bool,    HashSet::from([_bool,     uint8,     uint16,    uint32,    uint64,    int8,      int16,     int32,     int64,     float16,   float32,   bfloat16])),
+    (uint8,    HashSet::from([uint8,     uint8,     uint16,    uint32,    uint64,    int16,     int16,     int32,     int64,     float16,   float32,   bfloat16])),
+    (uint16,   HashSet::from([uint16,    uint16,    uint16,    uint32,    uint64,    int32,     int32,     int32,     int64,     float16,   float32,   bfloat16])),
+    (uint32,   HashSet::from([uint32,    uint32,    uint32,    uint32,    uint64,    int64,     int64,     int64,     int64,     float16,   float32,   bfloat16])),
+    (uint64,   HashSet::from([uint64,    uint64,    uint64,    uint64,    uint64,    float32,   float32,   float32,   float32,   float16,   float32,   bfloat16])),
+    (int8,     HashSet::from([int8,      int16,     int32,     int64,     float32,   int8,      int16,     int32,     int64,     float16,   float32,   bfloat16])),
+    (int16,    HashSet::from([int16,     int16,     int32,     int64,     float32,   int16,     int16,     int32,     int64,     float16,   float32,   bfloat16])),
+    (int32,    HashSet::from([int32,     int32,     int32,     int64,     float32,   int32,     int32,     int32,     int64,     float16,   float32,   bfloat16])),
+    (int64,    HashSet::from([int64,     int64,     int64,     int64,     float32,   int64,     int64,     int64,     int64,     float16,   float32,   bfloat16])),
+    (float16,  HashSet::from([float16,   float16,   float16,   float16,   float16,   float16,   float16,   float16,   float16,   float16,   float32,   float32])),
+    (float32,  HashSet::from([float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32])),
+    (bfloat16, HashSet::from([bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  float32,   float32,   bfloat16])),
+    ]);
+}
+pub fn least_upper_dtype(dtypes: &[Dtype]) -> Dtype {
+    let mut rets = HashSet::new();
+    for d in dtypes {
+        if rets.is_empty() {
+            rets = type_rules[d].clone();
+        }
+        rets = rets.intersection(&type_rules[d]).cloned().collect();
+    }
+    rets.iter().min().unwrap().to_owned()
+}

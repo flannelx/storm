@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use half::f16;
 use rand::Rng;
 
+use crate::codegen::kernel::{ConstBuffer, MemBuffer};
+use crate::ops::{self, ScheduleItem};
 use crate::prelude::*;
 use crate::{
     arg::Arg,
@@ -21,6 +23,12 @@ pub(crate) fn lb_id() -> LazyBufferId {
 }
 unsafe impl Send for LazyBuffer {}
 unsafe impl Sync for LazyBuffer {}
+
+impl core::fmt::Display for LazyBufferId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct LOArc(Arc<LazyOp>);
@@ -153,13 +161,11 @@ impl LazyBuffer {
         self.base().device_buffer.is_some()
     }
 
-    pub fn map_buffers(&self, real_srcs: &HashMap<&LazyBuffer, Option<LazyOpSrc>>) -> Self {
+    pub fn map_buffers(&self, real_srcs: &HashMap<LazyBuffer, LazyOpSrc>) -> LazyOpSrc {
         if let Some(s) = real_srcs.get(self) {
-            if let Some(ss) = s {
-                return ss.lb().clone();
-            }
+            return s.clone();
         }
-        self.clone()
+        self.clone().into()
     }
 
     pub fn loadop(
@@ -172,7 +178,7 @@ impl LazyBuffer {
     ) -> Self {
         let mut ss = vec![];
         if let Some(src) = src {
-            ss.push(src);
+            ss.push(src.into());
         };
         create_lazybuffer(
             device,
@@ -304,35 +310,93 @@ impl LazyBuffer {
     //     todo!()
     // }
 
+    // pub fn realize(&self) -> Self {
+    //     println!("Realizing LazyBuffer:{:?}", self);
+    //     let mut ret = self.clone();
+    //     if ret.is_realized() {
+    //         return ret;
+    //     }
+    //     //println!("1 ret {:?}", ret);
+    //     match &self.lazyop.optype {
+    //         OpType::Binary(_) => ret.lazyop = _ast_binaryops(&ret.lazyop, &ret.shape).into(),
+    //         OpType::Reduce(_) => ret.lazyop = _ast_reduceops(&ret.lazyop).into(),
+    //         OpType::Load(load) => match load {
+    //             Load::Empty => _realize_empty(self),
+    //             Load::Rand => _realize_rand(self),
+    //             Load::Const => _realize_const(self),
+    //             Load::From => todo!(),
+    //             Load::Contiguous => _realize_contiguous(self),
+    //             Load::Custom => todo!(),
+    //         },
+    //         _ => (),
+    //     }
+    //     //println!("2 ret {:?}", ret);
+    //     if !ret.is_realized() {
+    //         for x in ret.lazyop.buffers.iter_mut() {
+    //             println!("XXX Realizing LazyBuffer:{:?}", x);
+    //             x.realize();
+    //         }
+    //         let mut lin = DEVICE.get_linearizer((*self.lazyop).clone());
+    //         lin.linearize();
+    //         todo!("device exec ast");
+    //     }
+    //     //println!("3 ret {:?}", ret);
+    //     ret
+    // }
+
     pub fn realize(&self) -> Self {
-        println!("Realizing LazyBuffer:{:?}", self);
-        let mut ret = self.clone();
-        if ret.is_realized() {
-            return ret;
+        let items = self.schedule(HashSet::new());
+        println!(
+            "=================\n\n{} {items:?}\n\n=======================",
+            items.len()
+        );
+        run_schedule(items);
+        self.clone()
+    }
+
+    pub fn schedule(&self, mut seen: HashSet<Self>) -> VecDeque<ScheduleItem> {
+        if seen.contains(self) || self.is_realized() || self.is_unrealized_const() {
+            return VecDeque::new();
         }
-        //println!("1 ret {:?}", ret);
-        match &self.lazyop.optype {
-            OpType::Binary(_) => ret.lazyop = _ast_binaryops(&ret.lazyop, &ret.shape).into(),
-            OpType::Reduce(_) => ret.lazyop = _ast_reduceops(&ret.lazyop).into(),
-            OpType::Load(load) => match load {
-                Load::Empty => _realize_empty(self),
-                Load::Rand => _realize_rand(self),
-                Load::Const => _realize_const(self),
-                Load::From => todo!(),
-                Load::Contiguous => _realize_contiguous(self),
-                Load::Custom => todo!(),
-            },
-            _ => (),
+        seen.insert(self.clone());
+        if self.base() != *self {
+            return self.base().schedule(seen);
         }
-        //println!("2 ret {:?}", ret);
-        if !ret.is_realized() {
-            for x in ret.lazyop.buffers.iter_mut() {
-                x.realize();
-                println!("XXX Realizing LazyBuffer:{:?}", x);
-            }
-            todo!("device exec ast");
+
+        let mut op = (*self.lazyop).clone();
+        if matches!(self.lazyop.optype, OpType::Binary(_)) {
+            op = _ast_binaryops(&op, &self.shape);
+        } else if matches!(self.lazyop.optype, OpType::Reduce(_)) {
+            op = _ast_reduceops(&op);
         }
-        //println!("3 ret {:?}", ret);
+
+        let mut ret = VecDeque::new();
+        for x in op.buffers.iter() {
+            ret.extend(x.schedule(seen.clone()))
+        }
+
+        let (mut op, base_bufs) = _replace_bufferops(op);
+        //println!("replace_bufferops {:?} {:?}", op, base_bufs);
+        //println!("{:?}", ret.len());
+        if !matches!(op.optype, OpType::Load(_)) {
+            op = LazyOp::new(
+                OpType::Buffer(ops::Buffer::Store),
+                vec![op.into()],
+                Some(vec![Arg::Buffer(
+                    MemBuffer {
+                        idx: 0,
+                        dtype: self.dtype.clone(),
+                        st: ShapeTracker::from_shape(&self.base().shape),
+                    }
+                    .into(),
+                )]),
+            );
+        }
+        ret.push_back(ScheduleItem {
+            ast: op,
+            out: self.clone(),
+            inputs: base_bufs,
+        });
         ret
     }
 
@@ -371,7 +435,7 @@ impl LazyBuffer {
         create_lazybuffer(
             &out_device,
             ShapeTracker::new(&out_shape, None),
-            LazyOp::new(optype, srcs, None),
+            LazyOp::new(optype, srcs.into_iter().map(|s| s.into()).collect(), None),
             out_dtype,
             None,
         )
@@ -388,7 +452,7 @@ impl LazyBuffer {
             ShapeTracker::new(new_shape, None),
             LazyOp::new(
                 optype,
-                srcs,
+                srcs.into_iter().map(|s| s.into()).collect(),
                 Some(
                     unbound_new_shape
                         .iter()
@@ -485,7 +549,7 @@ impl LazyBuffer {
             st,
             LazyOp::new(
                 optype,
-                vec![self.clone()],
+                vec![self.clone().into()],
                 Some(
                     arg.iter()
                         .map(|i| Arg::Num(i.to_le_bytes().to_vec()))
@@ -756,8 +820,15 @@ fn _ast_binaryops(op: &LazyOp, shape: &[isize]) -> LazyOp {
             *v = Some(LazyOpSrc::LazyBuffer(k.reshape(intermediate_shape)));
         }
     }
-    let ast = op.map_buffers(&real_srcs);
-    LazyOp::new(OpType::Movement(Movement::Reshape), vec![ast], None)
+    let mut tmp = HashMap::new();
+    for (lb, op) in real_srcs {
+        if op.is_none() {
+            continue;
+        }
+        tmp.insert(lb.clone(), op.unwrap());
+    }
+    let ast = op.map_buffers(&tmp);
+    LazyOp::new(OpType::Movement(Movement::Reshape), vec![ast.into()], None)
 }
 
 fn get_single_root(root: &LazyBuffer) -> &LazyBuffer {
@@ -923,4 +994,133 @@ fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
         t => panic!("unable gen type t={t}"),
     };
     unsafe { Vec::<u8>::from_raw_parts(ptr, size * dtype.size, size * dtype.size)}
+}
+
+pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
+    let mut replacements: HashMap<LazyBuffer, LazyOp> = HashMap::new();
+    let base_bufs = v![x.base(), for x in op.buffers.iter(), if !x.is_unrealized_const()];
+    for x in op.buffers.iter() {
+        let st = x.st.simplify();
+        if base_bufs.contains(&x.base()) {
+            replacements.insert(
+                x.clone(),
+                LazyOp::new(
+                    OpType::Buffer(ops::Buffer::Load),
+                    vec![],
+                    Some(vec![Arg::Buffer(
+                        MemBuffer {
+                            idx: base_bufs.iter().position(|b| b == &x.base()).unwrap() + 1,
+                            dtype: x.dtype.clone(),
+                            st,
+                        }
+                        .into(),
+                    )]),
+                ),
+            );
+        } else if !x.is_realized() && matches!(x.base().lazyop.optype, OpType::Load(Load::Const)) {
+            replacements.insert(
+                x.clone(),
+                LazyOp::new(
+                    OpType::Buffer(ops::Buffer::Const),
+                    vec![],
+                    Some(vec![Arg::Buffer(
+                        ConstBuffer {
+                            val: x.base().lazyop.args[0].to_num::<f32>().to_string(),
+                            dtype: x.dtype.clone(),
+                            st,
+                        }
+                        .into(),
+                    )]),
+                ),
+            );
+        } else {
+            panic!("not handled {x:?}");
+        }
+    }
+    let mut tmp = HashMap::new();
+    for (k, v) in replacements {
+        tmp.insert(k, v.into());
+    }
+    let ret_op = if matches!(
+        op.optype,
+        OpType::Movement(Movement::Reshape) | OpType::Load(Load::Contiguous)
+    ) {
+        op.src[0].map_buffers(&tmp)
+    } else {
+        op.map_buffers(&tmp)
+    };
+
+    (ret_op.lo().clone(), base_bufs)
+}
+
+pub struct FlopCounter {
+    shape: Vec<isize>,
+    dtype: Dtype,
+    flops: usize,
+    mem: HashMap<usize, usize>,
+}
+impl FlopCounter {
+    pub fn mem_estimate(&self) -> usize {
+        self.mem.values().sum()
+    }
+}
+use crate::codegen::kernel::Buffers;
+pub fn ast_walk_flops(
+    op: Arg,
+    shape: &[isize],
+    dtype: Dtype,
+    flops: usize,
+    mem: HashMap<usize, usize>,
+) -> (Vec<isize>, Dtype, usize, HashMap<usize, usize>) {
+    match op {
+        Arg::Op(lo) => match lo.optype {
+            OpType::Unary(_) | OpType::Binary(_) | OpType::Reduce(_) => todo!(),
+            OpType::Ternary(_) => todo!(),
+            //OpType::Movement(_) => todo!(),
+            t => panic!("{t:?} replace_bufferops didnt work?"),
+        },
+        Arg::Buffer(b) => match b {
+            Buffers::MemBuffer(_) => todo!(),
+            Buffers::ConstBuffer(_) => todo!(),
+            Buffers::LazyBuffer(_) => todo!(),
+            Buffers::LocalBuffer(_) => todo!(),
+        },
+        t => panic!("{t:?} should not be in here"),
+    }
+}
+
+pub fn get_lazyop_info(ast: LazyOp) -> FlopCounter {
+    todo!()
+}
+
+pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
+    while !schedule.is_empty() {
+        let si = schedule.pop_front().unwrap();
+        assert!(
+            v![x.is_realized(), for x in si.inputs.iter()]
+                .iter()
+                .all(|b| *b),
+            "Can't run schedule, some inputs aren't realized"
+        );
+        match &si.ast.optype {
+            OpType::Load(l) => {
+                match l {
+                    Load::Empty => _realize_empty(&si.out),
+                    Load::Rand => _realize_rand(&si.out),
+                    Load::Const => _realize_const(&si.out),
+                    Load::From => _realize_from(&si.out),
+                    Load::Contiguous => todo!(),
+                    Load::Custom => todo!(),
+                }
+                continue;
+            }
+            _ => (),
+        }
+
+        let mut lin = DEVICE.get_linearizer(si.ast.clone());
+        lin.linearize();
+        println!("Lin name: {} Lin runtime args: {:?}", lin.name, lin.uops);
+
+        //let prg = DEVICE.build(name, program)
+    }
 }

@@ -544,7 +544,9 @@ impl<T: NumType> Tensor<T> {
         let x = self.reshape(x_reshape);
         // w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
         let mut w_reshape = Vec::new();
-        w_reshape.extend_from_slice(&w.shape().dims[0..n2 - 2]);
+        if n2 >= 2 {
+            w_reshape.extend_from_slice(&w.shape().dims[0..n2 - 2]);
+        }
         w_reshape.extend_from_slice(&vec![1; (n1 - 1).min(n2 - 1).min(1)]);
         w_reshape.extend_from_slice(&w.shape().dims[n2 - (n2.min(2))..]);
         let w = w.reshape(w_reshape).transpose(-1, -(n2.min(2) as isize));

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{dtype::Dtype, codegen::kernel::LinearizerOptions};
+use crate::{dtype::Dtype, codegen::kernel::{LinearizerOptions, Linearizer}, ops::LazyOp};
 
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = Arc::new(opencl::CLDevice::new());
@@ -26,7 +26,13 @@ pub trait Device: Send + Sync + core::fmt::Debug {
     fn copyout(&self, src: &dyn Buffer, dst: *mut u8);
     fn copyin(&self, src: Vec<u8>, dst: &mut dyn Buffer);
     fn synchronize(&self);
-    fn linearizer_opts(&self) -> LinearizerOptions;
+    fn linearizer_opts(&self) -> LinearizerOptions {
+        LinearizerOptions::default()
+    }
+    fn get_linearizer(&self, ast: LazyOp) -> Linearizer {
+        let mut lin = Linearizer::new(ast, Some(self.linearizer_opts()));
+        lin
+    }
 }
 
 pub trait Program: core::fmt::Debug {

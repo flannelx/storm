@@ -43,7 +43,7 @@ impl DerefMut for ArcViews {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ShapeTracker {
     pub views: Vec<View>,
 }
@@ -148,17 +148,19 @@ impl ShapeTracker {
         return (idx, valid);
     }
 
-    pub fn simplify(&mut self) {
+    pub fn simplify(&self) -> Self {
         if self.views.len() < 2 {
-            return;
+            return self.clone();
         }
         let l = self.views.len();
+        let mut ret = self.clone();
         if let Some(new_view) = merge_view(&self.views[l - 2], &self.views[l - 1]) {
-            self.views.pop();
-            self.views.pop();
-            self.views.push(new_view);
-            self.simplify();
+            ret.views.pop();
+            ret.views.pop();
+            ret.views.push(new_view);
+            ret = ret.simplify();
         }
+        ret
     }
 
     pub fn expr_idxs(&self, idxs: Option<Vec<ArcNode>>) -> (ArcNode, ArcNode) {

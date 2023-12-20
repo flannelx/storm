@@ -1,11 +1,17 @@
-use crate::{ops::OpType, prelude::*};
+use crate::{
+    codegen::kernel::Buffers,
+    ops::{LazyOp, OpType},
+    prelude::*,
+};
 
 #[derive(Clone, Debug, Hash, Eq)]
 pub enum Arg {
     Str(String),
-    Op(OpType),
-    Buf(LazyBuffer),
-    Num(Vec<u8>), // in little-endian bytes
+    OpType(OpType),
+    Op(LazyOp),
+    Buffer(Buffers),
+    Num(Vec<u8>), // in little-endian bytes, for devices
+    Usize(usize),
 }
 
 impl Arg {
@@ -18,14 +24,14 @@ impl Arg {
 
     pub fn to_op(&self) -> OpType {
         match self {
-            Arg::Op(op) => op.clone(),
+            Arg::OpType(op) => op.clone(),
             t => panic!("Can not to_op() {t:?}"),
         }
     }
 
-    pub fn to_buf(&self) -> LazyBuffer {
+    pub fn to_buf(&self) -> Buffers {
         match self {
-            Arg::Buf(buf) => buf.clone(),
+            Arg::Buffer(buf) => buf.clone(),
             t => panic!("Can not to_buf() {t:?}"),
         }
     }
@@ -40,7 +46,15 @@ impl Arg {
 
 impl PartialEq for Arg {
     fn eq(&self, other: &Self) -> bool {
-        self == other
+        match (self, other) {
+            (Arg::Str(a), Arg::Str(b)) => a == b,
+            (Arg::OpType(a), Arg::OpType(b)) => a == b,
+            (Arg::Op(a), Arg::Op(b)) => a == b,
+            (Arg::Buffer(a), Arg::Buffer(b)) => a == b,
+            (Arg::Num(a), Arg::Num(b)) => a == b,
+            (Arg::Usize(a), Arg::Usize(b)) => a == b,
+            _ => false,
+        }
     }
 }
 
@@ -56,7 +70,7 @@ impl PartialEq<str> for Arg {
 impl PartialEq<OpType> for Arg {
     fn eq(&self, other: &OpType) -> bool {
         match self {
-            Arg::Op(op) => op == other,
+            Arg::OpType(op) => op == other,
             _ => false,
         }
     }

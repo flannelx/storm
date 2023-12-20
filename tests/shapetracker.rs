@@ -69,7 +69,7 @@ fn test_real_simplifies_1() {
         ]),
     );
     let rst: Vec<isize> = st.real_strides(false).iter().map(|s| s.unwrap()).collect();
-    st.simplify();
+    st = st.simplify();
     assert!(st.views.len() == 1);
     assert!(st.views.last().unwrap().strides == rst);
 }
@@ -87,7 +87,7 @@ fn test_real_simplifies_2() {
         ]),
     );
     let rst: Vec<isize> = st.real_strides(false).iter().map(|s| s.unwrap()).collect();
-    st.simplify();
+    st = st.simplify();
     assert!(st.views.len() == 1);
     assert!(st.views.last().unwrap().strides == rst);
 }

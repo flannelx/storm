@@ -41,7 +41,7 @@ pub trait Op: 'static + core::fmt::Debug + Send + Sync {
     fn _mod(&self, a: &str, b: &str) -> String {
         unimplemented!()
     }
-    fn bmax(&self, a: &str, b: &str) -> String {
+    fn cmpmax(&self, a: &str, b: &str) -> String {
         unimplemented!()
     }
     fn cmplt(&self, a: &str, b: &str) -> String {
@@ -85,7 +85,7 @@ pub trait Op: 'static + core::fmt::Debug + Send + Sync {
                     Binary::Mul => self.mul(&args[0], &args[1]),
                     Binary::Div => self.div(&args[0], &args[1]),
                     Binary::Mod => self._mod(&args[0], &args[1]),
-                    Binary::Max => self.bmax(&args[0], &args[1]),
+                    Binary::Max => self.cmpmax(&args[0], &args[1]),
                     Binary::Cmplt => self.cmplt(&args[0], &args[1]),
                 }
             }
@@ -164,6 +164,8 @@ pub enum Load {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Buffer {
+    Load,
+    Store,
     Const,
     Mem
 }
@@ -266,6 +268,27 @@ impl LazyOpSrc {
             LazyOpSrc::LazyBuffer(_) => panic!("Lazyop cant turn into lazyop"),
         }
     }
+
+    pub fn optype(&self) -> OpType {
+        match self {
+            LazyOpSrc::LazyOp(o) => o.optype.clone(),
+            LazyOpSrc::LazyBuffer(b) => b.lazyop.optype.clone(),
+        }
+    }
+
+    pub fn src(&self) -> Vec<LazyOpSrc> {
+        match self {
+            LazyOpSrc::LazyOp(o) => o.src.clone(),
+            LazyOpSrc::LazyBuffer(b) => b.lazyop.src.clone(),
+        }
+    }
+
+    pub fn map_buffers(&self, real_srcs: &HashMap<LazyBuffer, LazyOpSrc>) -> LazyOpSrc {
+        match self {
+            LazyOpSrc::LazyOp(o) => o.map_buffers(real_srcs),
+            LazyOpSrc::LazyBuffer(b) => b.map_buffers(real_srcs),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -297,9 +320,9 @@ impl LazyOpsDefaultImpl for LazyOp {
 }
 
 impl LazyOp {
-    pub fn new<LOS: Into<LazyOpSrc>>(
+    pub fn new(
         optype: OpType,
-        src: Vec<LOS>,
+        src: Vec<LazyOpSrc>,
         mut args: Option<Vec<Arg>>,
     ) -> Self {
         let mut buffers = vec![];
@@ -323,16 +346,15 @@ impl LazyOp {
         }
     }
 
-    pub fn map_buffers(&self, real_srcs: &HashMap<&LazyBuffer, Option<LazyOpSrc>>) -> Self {
+    pub fn map_buffers(&self, real_srcs: &HashMap<LazyBuffer, LazyOpSrc>) -> LazyOpSrc {
         let mut srcs = vec![];
         for y in self.src.iter() {
-            let ss = match y {
-                LazyOpSrc::LazyOp(lop) => LazyOpSrc::LazyOp(lop.map_buffers(real_srcs).into()),
-                LazyOpSrc::LazyBuffer(lb) => LazyOpSrc::LazyBuffer(lb.map_buffers(real_srcs)),
-            };
+            let ss = y.map_buffers(real_srcs);
             srcs.push(ss);
         }
-        LazyOp::new(self.optype.clone(), srcs, Some(self.args.clone()))
+        let ret = LazyOp::new(self.optype.clone(), srcs, Some(self.args.clone()));
+        println!(">>>>>>> {ret:?}");
+        ret.into()
     }
 
     pub fn get_lazyops(&self) -> Vec<LazyOp> {
@@ -351,22 +373,6 @@ pub struct ScheduleItem {
     pub ast: LazyOp,
     pub out: LazyBuffer,
     pub inputs: Vec<LazyBuffer>,
-    pub var_vals: HashMap<Variable, isize>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MemBuffer {
-    pub idx: isize,
-    pub dtype: Dtype,
-    pub st: ShapeTracker
-}
-
-
-#[derive(Debug, Clone)]
-pub struct ConstBuffer<T> {
-    pub val: T,
-    pub dtype: Dtype,
-    pub st: ShapeTracker
 }
 
 #[derive(Clone)]

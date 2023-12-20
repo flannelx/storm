@@ -1,4 +1,5 @@
 use crate::arg::Arg;
+use crate::codegen::kernel::Buffers;
 use crate::{
     codegen::linearizer::{UOp, UOps},
     dtype,
@@ -72,7 +73,7 @@ impl Op for CstyleLanguage {
         format!("({a}%{b})")
     }
 
-    fn bmax(&self, a: &str, b: &str) -> String {
+    fn cmpmax(&self, a: &str, b: &str) -> String {
         format!("max({a},{b})")
     }
 
@@ -206,24 +207,24 @@ impl CstyleLanguage {
         &self,
         function_name: &str,
         kernel: &[String],
-        bufs: &[LazyBuffer],
+        bufs: &[Buffers],
         local_size: &[usize],
         _prekernel: &[String],
     ) -> String {
-        let tmp = if bufs.iter().any(|b| b.dtype.shape.is_some()) {
+        let tmp = if bufs.iter().any(|b| b.dtype().shape.is_some()) {
             "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
         } else {
             ""
         };
         let mut buftypes = vec![];
         for (i, buffer) in bufs.iter().enumerate() {
-            let s = if buffer.dtype.c_name.starts_with("image") {
+            let s = if buffer.dtype().c_name.starts_with("image") {
                 format!(
                     "{} image2d_t",
                     if 1 > 0 { "read_only" } else { "write_only" }
                 )
             } else {
-                if buffer.dtype == dtype::_arg_int32 {
+                if buffer.dtype() == dtype::_arg_int32 {
                     self.arg_int_prefix.to_string()
                 } else {
                     (if i > 0 {
@@ -231,7 +232,7 @@ impl CstyleLanguage {
                     } else {
                         "".to_string()
                     }) + &self.buffer_prefix
-                        + buffer.dtype.c_name
+                        + buffer.dtype().c_name
                         + "*"
                         + &self.buffer_suffix
                 }
@@ -261,7 +262,7 @@ impl CstyleLanguage {
 
         prg += &format!("{}{}{}{}", ") {\n", tmp, kernel.join("\n"), "\n");
 
-        if self.half_prekernel.is_some() && bufs.iter().any(|buffer| buffer.dtype == dtype::float16) {
+        if self.half_prekernel.is_some() && bufs.iter().any(|buffer| buffer.dtype() == dtype::float16) {
             prg = self.half_prekernel.as_ref().unwrap().clone() + "\n" + &prg;
         }
 
@@ -343,7 +344,7 @@ fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>) -> 
         }
     }
     for u in uops.iter() {
-        let (uop, dtype, vin, args, _) = (&u.uop, &u.dtype, &u.vin, u.args.clone(), u.num);
+        let (uop, dtype, vin, args) = (&u.uop, &u.dtype, &u.vin, u.args.clone());
         match uop {
             UOps::LOOP => {
                 *r.get_mut(&u).unwrap() = ssa(u, "ridx", &mut c, &mut r);
@@ -382,7 +383,7 @@ fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>) -> 
                     let a = r[&vin[0]].clone().replace("(", "").replace(")", "");
                     let b = r[&vin[1]].clone();
                     val = match &args[0] {
-                        Arg::Op(op) => lang.call(&op, vec![a, b], None),
+                        Arg::OpType(op) => lang.call(&op, vec![a, b], None),
                         _ => unreachable!(),
                     }
                 } else {
@@ -394,7 +395,7 @@ fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>) -> 
                         "".to_string()
                     };
                     val = match &args[0] {
-                        Arg::Op(op) => lang.call(&op, vec![a, b, c], None),
+                        Arg::OpType(op) => lang.call(&op, vec![a, b, c], None),
                         _ => unreachable!(),
                     }
                 }
@@ -601,6 +602,7 @@ fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>) -> 
                     ),
                 );
             }
+            UOps::PHI => todo!(),
         }
     }
     lang.render_kernel(function_name, &kernel, &bufs, &local_size, &prekernel)

@@ -169,8 +169,4 @@ impl Device for CLDevice {
         opencl3::command_queue::finish(self.queue.get()).expect("Queue finish failed");
         PENDING_COPY.lock().unwrap().0.clear();
     }
-
-    fn linearizer_opts(&self) -> crate::codegen::kernel::LinearizerOptions {
-        todo!()
-    }
 }

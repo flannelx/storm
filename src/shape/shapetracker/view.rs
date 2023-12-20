@@ -2,7 +2,7 @@ use super::util::*;
 use crate::shape::symbolic::{ands, num, sum, var, ArcNode};
 use crate::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct View {
     pub shape: Vec<isize>,
     pub strides: Vec<isize>,
