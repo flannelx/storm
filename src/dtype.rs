@@ -275,7 +275,6 @@ pub const _arg_int32: Dtype = Dtype {
 // num_impl!(i64, false, false, true);
 
 pub fn name_to_dtype(name: &str) -> Dtype {
-    let name = name.split("::").last().unwrap();
     match name {
         "f16" => float16,
         "f32" => float32,

@@ -19,6 +19,8 @@ use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+pub type TensorDefaultType = f32;
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub struct TensorId(pub(crate) usize);
 
@@ -28,17 +30,17 @@ pub(crate) fn tensor_id() -> TensorId {
 }
 
 #[derive(Clone)]
-pub struct Tensor<T: NumType = f32> {
+pub struct Tensor {
     pub buffer: LazyBuffer,
     pub require_grad: bool,
-    pub grad: Arc<Mutex<Option<Tensor<T>>>>,
-    pub _ctx: Option<Box<dyn Function<T>>>,
+    pub grad: Arc<Mutex<Option<Tensor>>>,
+    pub _ctx: Option<Box<dyn Function>>,
     pub id: TensorId,
     pub dtype: Dtype,
     pub device: String,
 }
 
-impl<T: NumType> Tensor<T> {
+impl Tensor {
     pub fn device(&self) -> String {
         self.device.clone()
     }
@@ -67,7 +69,7 @@ impl<T: NumType> Tensor<T> {
         }
     }
 
-    pub fn from<V: Into<Vec<T>>>(data: V) -> Self {
+    pub fn from<T: num_traits::Num, V: Into<Vec<T>>>(data: V) -> Self {
         let data = data.into();
         let buffer = LazyBuffer::from_cpu(data);
         Self {
@@ -85,16 +87,22 @@ impl<T: NumType> Tensor<T> {
         Contiguous::default().apply(self, None, None, None, None)
     }
 
-    pub fn to_vec(&self) -> Vec<T> {
+    pub fn to_vec<T: NumType>(&self) -> Vec<T> {
+        assert!(
+            std::any::type_name::<T>().split("::").last().unwrap() == self.dtype(),
+            "cannot return Tensor<{}> to Vec<{}>",
+            self.dtype(),
+            std::any::type_name::<T>().split("::").last().unwrap()
+        );
+        let mut ret = self.buffer.to_cpu(); // this should be aysnc;
+        DEVICE.synchronize();
+        let ret_ptr = ret.as_mut_ptr() as *mut T;
+        let len = ret.len();
+        let size = std::mem::size_of::<T>();
         unsafe {
-            let mut ret = self.buffer.to_cpu(); // this is aysnc;
-            DEVICE.synchronize();
-            let ret_ptr = ret.as_mut_ptr() as *mut T;
-            let len = ret.len();
+            let ret_t = Vec::from_raw_parts(ret.as_mut_ptr() as *mut T, len / size, len / size);
             std::mem::forget(ret);
-            let size = std::mem::size_of::<T>();
-            let ret = Vec::from_raw_parts(ret_ptr, len / size, len / size);
-            ret
+            ret_t
         }
     }
 
@@ -137,7 +145,7 @@ impl<T: NumType> Tensor<T> {
         Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None, None)
     }
 
-    pub fn _const(value: T) -> Self {
+    pub fn _const<T: NumType>(value: T) -> Self {
         let dtype = crate::dtype::name_to_dtype(std::any::type_name::<T>());
         Self::_load(
             OpType::Load(Load::Const),
@@ -148,7 +156,7 @@ impl<T: NumType> Tensor<T> {
         )
     }
 
-    pub fn const_like(&self, const_value: T) -> Self {
+    pub fn const_like<T: NumType>(&self, const_value: T) -> Self {
         Self::_const(const_value)
             .reshape(vec![1; self.shape().len()])
             .expand(self.shape().dims)
@@ -156,14 +164,14 @@ impl<T: NumType> Tensor<T> {
 
     pub fn zeros<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::_const(T::zero())
+        Self::_const(0)
             .reshape(vec![1; shape.len()])
             .expand(shape.dims)
     }
 
     pub fn ones<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::_const(T::one())
+        Self::_const(1)
             .reshape(vec![1; shape.len()])
             .expand(shape.dims)
     }
@@ -173,7 +181,7 @@ impl<T: NumType> Tensor<T> {
         Self::_load(
             OpType::Load(Load::Rand),
             shape.numel(),
-            type_to_dtype::<T>(),
+            type_to_dtype::<TensorDefaultType>(),
             None,
             None,
         )
@@ -228,7 +236,7 @@ impl<T: NumType> Tensor<T> {
         // mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(dtypes.bool)
         // return self * mask * (1/(1.0 - p))
         let p = if p.is_some() { p.unwrap() } else { 0.2 };
-        let mask = Self::rand(self.shape())._ge(&Tensor::from([T::from_f32(p).unwrap()]));
+        let mask = Self::rand(self.shape())._ge(&Tensor::from([p]));
         self * mask * (1.0 / (1.0 - p))
     }
 
@@ -419,7 +427,7 @@ impl<T: NumType> Tensor<T> {
             .sum_keepdim(0)
     }
 
-    pub fn _reduce<F: 'static + Function<T>>(
+    pub fn _reduce<F: 'static + Function>(
         &self,
         mut fxn: F,
         axis: Vec<isize>,
@@ -436,12 +444,11 @@ impl<T: NumType> Tensor<T> {
             let fxn_name = std::any::type_name::<F>().split("::").last().unwrap();
             return Self::full(
                 v![if s == 0 { 1 } else { s }, for s in self.shape().dims],
-                T::from_f32(if fxn_name == "Sum" {
+                if fxn_name == "Sum" {
                     0.0
                 } else {
                     -f32::INFINITY
-                })
-                .unwrap(),
+                },
             );
         }
         let new_shape = v![if axis_.contains(&(i as isize)) { 1 } else { *s }, for (i, s) in self.shape().dims.iter().enumerate()];
@@ -993,17 +1000,17 @@ impl<T: NumType> Tensor<T> {
         // if stop is None: stop, start = start, 0
         // return Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
         let s = ((stop - start) / step).ceil() as isize;
-        Self::full([s], T::from_f32(step).unwrap()).cumsum() + (start - step)
+        Self::full([s], step).cumsum() + (start - step)
     }
 
-    pub fn full<S: Into<Vec<isize>>>(shape: S, const_: T) -> Self {
+    pub fn full<S: Into<Vec<isize>>>(shape: S, const_: impl NumType) -> Self {
         let shape = shape.into();
         //panic!("in _full to_shape:{}", shape);
         Self::_const(const_)
             .reshape(vec![1; shape.len()])
             .expand(shape)
     }
-    pub fn full_like(&self, const_: T) -> Self {
+    pub fn full_like(&self, const_: impl NumType) -> Self {
         let shape = self.shape();
         Self::_const(const_)
             .reshape(vec![1; shape.len()])
@@ -1030,7 +1037,7 @@ impl<T: NumType> Tensor<T> {
 
     // self is pred
     pub fn sparse_categorical_crossentropy(&self, y: &Self) -> Self {
-        let loss_mark = y._ne(&y.full_like(T::from_f32(-1.0).unwrap()));
+        let loss_mark = y._ne(&y.full_like(-1.0));
         //y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
         let mut y_counter = Self::arange(self.shape()[-1] as f32);
         y_counter = y_counter
@@ -1062,8 +1069,8 @@ impl<T: NumType> Tensor<T> {
     }
 
     pub fn clip(&self, min: f32, max: f32) -> Self {
-        self.maximum(&Tensor::from([T::from_f32(min).unwrap()]))
-            .minimum(&Tensor::from([T::from_f32(max).unwrap()]))
+        self.maximum(&Tensor::from([min]))
+            .minimum(&Tensor::from([max]))
     }
 
     pub fn maximum(&self, x: &Self) -> Self {
@@ -1126,9 +1133,9 @@ impl<T: NumType> Tensor<T> {
         self._lt(rhs) + self._gt(rhs)
     }
 
-    pub fn _where(&self, y: f32, z: f32) -> Self {
-        let y = Self::_const(T::from_f32(y).unwrap());
-        let z = Self::_const(T::from_f32(z).unwrap());
+    pub fn _where<N: NumType>(&self, y: N, z: N) -> Self {
+        let y = Self::_const(y);
+        let z = Self::_const(z);
         self._where_(&y, &z)
     }
 

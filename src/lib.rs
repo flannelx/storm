@@ -19,8 +19,7 @@ pub mod prelude {
     pub use crate::device::{prelude::*, Buffer, Device, Program};
     pub use crate::dtype::{self, Dtype};
     pub use crate::lazy::LazyBuffer;
-    pub use crate::tensor::Tensor;
+    pub use crate::tensor::{Tensor, TensorDefaultType};
     pub use crate::izip;
     pub use crate::macros::*;
-    pub use half::f16;
 }
