@@ -65,7 +65,9 @@ impl View {
             ret.push(num(self.offset));
         }
         let mut acc = 1;
-        for &(d, s) in to_shape_strides(&self.shape, &self.strides).iter().rev() {
+        println!(">>>>>>>>>{:?} {:?}<<<<<<<<<", self.shape, self.strides);
+        for &(d, s, _) in _merge_dims(&self.shape, &self.strides, None).iter().rev() {
+            println!(">>>>>>>>>{d} {s}<<<<<<<<<");
             ret.push(((&idx / acc) % d) * s);
             acc *= d;
         }
@@ -262,32 +264,40 @@ impl View {
     }
 
     pub fn permute(&self, axis: &[isize]) -> Self {
-        let mut new_shape = vec![];
-        let mut new_stride = vec![];
-        let mut new_mask = vec![];
-        for &i in axis.iter() {
-            let i = if i >= 0 {
-                i as usize
-            } else {
-                (self.strides.len() as isize + i) as usize
-            };
-            new_shape.push(self.shape[i]);
-            new_stride.push(self.strides[i]);
-            if let Some(m) = &self.mask {
-                new_mask.push(m[i])
-            }
-        }
-        let new_view = View::new(
-            &new_shape,
-            Some(new_stride),
-            Some(self.offset),
-            if self.mask.is_some() {
-                Some(new_mask)
-            } else {
-                None
-            },
-        );
-        new_view
+
+    // return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None)  # noqa: E501
+        let new_mask = if let Some(m) = &self.mask {
+            Some(v![m[*a as usize], for a in axis])
+        } else {
+            None
+        };
+        View::new(&v![self.shape[*a as usize], for a in axis], Some(v![self.strides[*a as usize], for a in axis]), Some(self.offset), new_mask)
+        // let mut new_shape = vec![];
+        // let mut new_stride = vec![];
+        // let mut new_mask = vec![];
+        // for &i in axis.iter() {
+        //     let i = if i >= 0 {
+        //         i as usize
+        //     } else {
+        //         (self.strides.len() as isize + i) as usize
+        //     };
+        //     new_shape.push(self.shape[i]);
+        //     new_stride.push(self.strides[i]);
+        //     if let Some(m) = &self.mask {
+        //         new_mask.push(m[i])
+        //     }
+        // }
+        // let new_view = View::new(
+        //     &new_shape,
+        //     Some(new_stride),
+        //     Some(self.offset),
+        //     if self.mask.is_some() {
+        //         Some(new_mask)
+        //     } else {
+        //         None
+        //     },
+        // );
+        // new_view
     }
 
     pub fn stride(&self, mul: &[isize]) -> Self {

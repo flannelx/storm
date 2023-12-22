@@ -8,13 +8,16 @@ use num_traits::Zero;
 use crate::arg::Arg;
 use crate::dtype::type_to_dtype;
 use crate::dtype::NumType;
+use crate::lazy::run_schedule;
 use crate::ops::Load;
 use crate::ops::OpType;
 use crate::prelude::*;
 use crate::prelude::*;
 use crate::tensor::mlops::*;
 use crate::tensor::shape::Shape;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -87,6 +90,8 @@ impl Tensor {
         Contiguous::default().apply(self, None, None, None, None)
     }
 
+    // TODO: This is probably stuck with generic param.
+    //      Or have three verions of this. 1. T, 2. String, 3. Raw bytes
     pub fn to_vec<T: NumType>(&self) -> Vec<T> {
         assert!(
             std::any::type_name::<T>().split("::").last().unwrap() == self.dtype(),
@@ -94,16 +99,18 @@ impl Tensor {
             self.dtype(),
             std::any::type_name::<T>().split("::").last().unwrap()
         );
-        let mut ret = self.buffer.to_cpu(); // this should be aysnc;
-        DEVICE.synchronize();
-        let ret_ptr = ret.as_mut_ptr() as *mut T;
-        let len = ret.len();
-        let size = std::mem::size_of::<T>();
-        unsafe {
-            let ret_t = Vec::from_raw_parts(ret.as_mut_ptr() as *mut T, len / size, len / size);
-            std::mem::forget(ret);
-            ret_t
-        }
+        // let ret = self.realize();
+        // let mut ret = self.buffer.to_cpu(); // this should be aysnc;
+        // DEVICE.synchronize();
+        // let ret_ptr = ret.as_mut_ptr() as *mut T;
+        // let len = ret.len();
+        // let size = std::mem::size_of::<T>();
+        // unsafe {
+        //     let ret_t = Vec::from_raw_parts(ret.as_mut_ptr() as *mut T, len / size, len / size);
+        //     std::mem::forget(ret);
+        //     ret_t
+        // }
+        todo!()
     }
 
     // ------------ Load
@@ -145,14 +152,14 @@ impl Tensor {
         Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None, None)
     }
 
-    pub fn _const<T: NumType>(value: T) -> Self {
-        let dtype = crate::dtype::name_to_dtype(std::any::type_name::<T>());
+    pub fn _const(value: impl Display) -> Self {
+        let dtype = crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>());
         Self::_load(
             OpType::Load(Load::Const),
             1,
             dtype,
             None,
-            Some(vec![Arg::Num(value._to_le_bytes())]),
+            Some(vec![Arg::Str(value.to_string())]),
         )
     }
 
@@ -500,7 +507,7 @@ impl Tensor {
         if axis.is_none() {
             let idx = (self._eq(&self.max_all()))
                 * Self::_arange(self.numel() as f32 - 1., -1., -1.).reshape(self.shape());
-            return self.numel() - idx.max_all() - 1;
+            return self.numel() as isize - idx.max_all() - 1;
         }
         let mut axis = axis.unwrap();
         axis = axis + if axis < 0 { self.ndim() as isize } else { axis };
@@ -718,6 +725,7 @@ impl Tensor {
         self._conv2d(weigth, None, 1, 1, 1, [0])
     }
 
+    #[rustfmt::skip]
     pub fn _conv2d<V: Into<Vec<usize>>>(
         &self,
         weight: &Self,
@@ -780,39 +788,18 @@ impl Tensor {
             .iter()
             .map(|i| *i as usize)
             .collect::<Vec<usize>>();
-        //reshape(bs, groups, cin, 1, *oyx, *HW)
-        let mut rsh_tmp = vec![bs, groups, cin, 1];
-        rsh_tmp.extend(oyx.iter());
-        rsh_tmp.extend(hw.iter());
-        //expand(bs, groups, cin, rcout, *oyx, *HW)
-        let mut exp_tmp = vec![bs, groups, cin, rcout];
-        exp_tmp.extend(oyx.iter());
-        exp_tmp.extend(hw.iter());
-        //permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
-        let mut permute_tmp = vec![0, 1, 3];
-        permute_tmp.extend((0..oyx.len()).into_iter().map(|i| 4 + i));
-        permute_tmp.push(2);
-        permute_tmp.extend((0..hw.len()).into_iter().map(|i| 4 + oyx.len() + i));
-        x = x.reshape(rsh_tmp).expand(exp_tmp).permute(permute_tmp);
+        x = x.reshape(vec![vec![bs, groups,cin, 1], oyx.clone(), hw.clone()].concat())
+             .expand(vec![vec![bs, groups, cin, rcout], oyx.clone(), hw.clone()].concat())
+             .permute(vec![vec![0,1,3], v![4+1, for i in 0..oyx.len()], vec![2], v![4+oyx.len()+i, for i in 0..hw.len()]].concat());
         // ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
-        let mut w_rsh_tmp = vec![1, groups, rcout];
-        w_rsh_tmp.extend(vec![1; oyx.len()]);
-        w_rsh_tmp.push(cin);
-        w_rsh_tmp.extend(hw.iter());
-        let mut ret = x * weight.reshape(w_rsh_tmp);
-        ret._sum(v![-1-(i as isize), for i in 0..1+oyx.len()], true)
-            .reshape(vec![vec![bs, cout], oyx.clone()].concat());
-        let mut ret_rsh_tmp = vec![bs, cout];
-        ret_rsh_tmp.extend(oyx.iter());
-        ret = ret.reshape(ret_rsh_tmp);
-        if bias.is_none() {
-            return ret;
+        x = (x*weight.reshape(vec![vec![1, groups, rcout], vec![1;oyx.len()], vec![cin], hw.clone()].concat()))._sum(v![-1-i as isize, for i in 0..1+oyx.len()], true).reshape(vec![vec![bs, cout], oyx.clone()].concat());
+
+        if let Some(bias) = bias {
+            // bias.reshape(1, -1, *[1] * len(HW))
+            x + bias.reshape(vec![vec![1,-1], vec![1;hw.len()]].concat())
+        } else {
+            x
         }
-        // bias.reshape(1, -1, *[1] * len(HW))
-        let bias = bias.unwrap();
-        let mut b_rsh_tmp = vec![1, bias.shape().len()];
-        b_rsh_tmp.extend(vec![1; hw.len()]);
-        ret + bias.reshape(b_rsh_tmp)
     }
 
     pub fn t(&self) -> Self {
@@ -1156,7 +1143,7 @@ impl Tensor {
     pub fn mean(&self) -> Self {
         let out = self.sum_all();
         let o_numel = out.shape().numel();
-        out * o_numel / self.shape().numel()
+        out * o_numel as isize / self.shape().numel() as isize
     }
 
     // def abs(self): return self.relu() + (-self).relu()
@@ -1169,7 +1156,7 @@ impl Tensor {
     }
 
     pub fn realize(&self) -> Self {
-        self.contiguous().buffer.realize();
+        run_schedule(self.buffer.schedule(HashSet::new()));
         self.clone()
     }
 

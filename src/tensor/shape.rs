@@ -2,7 +2,7 @@ use core::ops::Index;
 use num_traits::{PrimInt, ToPrimitive};
 use std::ops::RangeBounds;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct Shape {
     pub dims: Vec<isize>,
 }

@@ -314,7 +314,7 @@ impl CstyleLanguage {
     }
 }
 
-fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>) -> String {
+pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>) -> String {
     let mut local_size: Vec<usize> = vec![];
     let mut kernel: Vec<String> = vec![];
     let mut prekernel: Vec<String> = vec![];

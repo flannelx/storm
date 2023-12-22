@@ -1,6 +1,10 @@
-use crate::shape::{
-    shapetracker::ShapeTracker,
-    symbolic::{sum, ArcNode},
+use crate::{
+    izip,
+    shape::{
+        shapetracker::ShapeTracker,
+        symbolic::{sum, ArcNode},
+    },
+    v,
 };
 
 use super::view::View;
@@ -17,6 +21,70 @@ pub fn to_shape_strides(shape: &[isize], strides: &[isize]) -> Vec<(isize, isize
         } else {
             ret.push((shape[i], strides[i]));
         }
+    }
+    ret
+}
+
+pub fn _merge_dims(
+    shape: &[isize],
+    strides: &[isize],
+    mask: Option<Vec<(isize, isize)>>,
+) -> Vec<(isize, isize, isize)> {
+    if shape.len() == 0 {
+        return vec![];
+    }
+    assert!(shape.len() == strides.len());
+    let mut ret = vec![(
+        shape[0],
+        strides[0],
+        if strides[0] > 0 { shape[0] } else { 0 },
+    )];
+    let mut state = if mask.is_some()
+        && strides[0] == 0
+        && shape[0] != 1
+        && mask.as_ref().unwrap()[0].1 - mask.as_ref().unwrap()[0].0 == 1
+    {
+        1
+    } else {
+        0
+    };
+    let start_i = 1;
+    for (i, (&sh, &st)) in izip!(shape[1..].iter(), strides[1..].iter()).enumerate() {
+        let i = start_i + i;
+        if sh == 1 {
+            continue;
+        }
+        if state == 1 || ret[ret.len() - 1].1 == sh * st {
+            *ret.last_mut().unwrap() = (
+                ret[ret.len() - 1].0 * sh,
+                st,
+                if state == 1 {
+                    sh
+                } else {
+                    if st > 0 {
+                        ret[ret.len() - 1].2 * sh
+                    } else {
+                        0
+                    }
+                },
+            );
+        }
+        else {
+            ret.push((sh, st, if st > 0 { sh } else { 0 }));
+        }
+        state = if let Some(ref m) = mask {
+            if st == 0 && m[i].1 - m[i].0 == 1 {
+                1
+            } else {
+                0
+            }
+        } else {
+            if state !=0 {
+                2
+            } else {
+                0
+            }
+        };
     }
     ret
 }
@@ -55,22 +123,45 @@ pub fn idxs_to_idx(shape: &[isize], idxs: &[ArcNode]) -> ArcNode {
 }
 
 pub fn merge_view(vm2: &View, vm1: &View) -> Option<View> {
-    if vm2.mask.is_some() {
+    if vm1.contiguous && vm1.shape == vm2.shape {
+        return Some(vm2.clone());
+    }
+    if vm2.contiguous {
+        return Some(vm1.clone());
+    }
+    if vm2.mask.is_some() || vm1.offset != 0 {
         return None;
     }
-    let mst = ShapeTracker::new(&vm1.shape, Some([vm2.clone(), vm1.clone()].to_vec()));
-    let strides = mst.real_strides(false);
-    //println!("vm1 st real strides {:?}", strides);
-    if strides.iter().any(|n| n.is_none()) {
+    let strides = ShapeTracker {
+        views: vec![vm2.clone(), vm1.clone()],
+    }
+    .real_strides(false);
+    if strides.contains(&None) {
         return None;
     }
-    let strides = strides.iter().map(|s| s.unwrap()).collect();
-    Some(View::new(
+    let strides = v![s.unwrap(), for s in strides];
+    return Some(View::new(
         &vm1.shape,
         Some(strides),
-        Some(mst.real_offset()),
+        Some(vm2.offset),
         vm1.mask.clone(),
-    ))
+    ));
+    // if vm2.mask.is_some() {
+    //     return None;
+    // }
+    // let mst = ShapeTracker::new(&vm1.shape, Some([vm2.clone(), vm1.clone()].to_vec()));
+    // let strides = mst.real_strides(false);
+    // //println!("vm1 st real strides {:?}", strides);
+    // if strides.iter().any(|n| n.is_none()) {
+    //     return None;
+    // }
+    // let strides = strides.iter().map(|s| s.unwrap()).collect();
+    // Some(View::new(
+    //     &vm1.shape,
+    //     Some(strides),
+    //     Some(mst.real_offset()),
+    //     vm1.mask.clone(),
+    // ))
 }
 
 pub fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
@@ -113,16 +204,18 @@ pub fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
                     .map(|(_, &mm)| mm)
                     .rev()
                     .collect();
-                new_mask_tuple = Some(new_shape
-                    .iter()
-                    .map(|&x| {
-                        if x == 1 {
-                            (0, 1)
-                        } else {
-                            new_mask.pop().unwrap()
-                        }
-                    })
-                    .collect::<_>());
+                new_mask_tuple = Some(
+                    new_shape
+                        .iter()
+                        .map(|&x| {
+                            if x == 1 {
+                                (0, 1)
+                            } else {
+                                new_mask.pop().unwrap()
+                            }
+                        })
+                        .collect::<_>(),
+                );
             }
         };
         return (
@@ -145,7 +238,10 @@ pub fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
     return (new_view, true);
 }
 
-pub fn get_pad_args(shape: &[isize], arg: &[(isize, isize)]) -> (Vec<(isize, isize)>, Vec<(isize, isize)>) {
+pub fn get_pad_args(
+    shape: &[isize],
+    arg: &[(isize, isize)],
+) -> (Vec<(isize, isize)>, Vec<(isize, isize)>) {
     let mut ret = (vec![], vec![]);
     for (&s, &(b, e)) in shape.iter().zip(arg.iter()) {
         ret.0.push((-b, s + e))

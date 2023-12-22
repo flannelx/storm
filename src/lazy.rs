@@ -206,15 +206,6 @@ impl LazyBuffer {
         todo!()
     }
 
-    pub fn to_cpu(&self) -> Vec<u8> {
-        self.realize()
-            .base()
-            .device_buffer
-            .as_deref()
-            .unwrap()
-            .to_cpu()
-    }
-
     pub fn copy_to_device(&self, device: &str) -> Self {
         if !self.is_realized()
             && matches!(self.lazyop.optype, OpType::Load(_))
@@ -343,16 +334,6 @@ impl LazyBuffer {
     //     //println!("3 ret {:?}", ret);
     //     ret
     // }
-
-    pub fn realize(&self) -> Self {
-        let items = self.schedule(HashSet::new());
-        println!(
-            "=================\n\n{} {items:?}\n\n=======================",
-            items.len()
-        );
-        run_schedule(items);
-        self.clone()
-    }
 
     pub fn schedule(&self, mut seen: HashSet<Self>) -> VecDeque<ScheduleItem> {
         if seen.contains(self) || self.is_realized() || self.is_unrealized_const() {
@@ -931,8 +912,6 @@ fn get_contraction(old_shape: &[isize], new_shape: &[isize]) -> Option<Vec<Vec<i
 }
 
 fn _realize_from(buffer: &LazyBuffer) {
-    let realized_buffer = buffer.lazyop.src[0].lb().realize();
-    assert!(realized_buffer.is_realized());
     todo!()
 }
 
@@ -971,7 +950,7 @@ fn _realize_const(buffer: &LazyBuffer) {
 }
 
 fn _realize_contiguous(buffer: &LazyBuffer) {
-    buffer.lazyop.src[0].lb().realize();
+    todo!();
 }
 
 // Have to do this because the lack of num trait in Rust.
@@ -1025,7 +1004,7 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
                     vec![],
                     Some(vec![Arg::Buffer(
                         ConstBuffer {
-                            val: x.base().lazyop.args[0].to_num::<f32>().to_string(),
+                            val: x.base().lazyop.args[0].to_str(),
                             dtype: x.dtype.clone(),
                             st,
                         }
@@ -1094,6 +1073,10 @@ pub fn get_lazyop_info(ast: LazyOp) -> FlopCounter {
 }
 
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
+    println!("Schedule items: >>> ");
+    for s in schedule.iter() {
+        println!("{:?}",s.ast.optype)
+    }
     while !schedule.is_empty() {
         let si = schedule.pop_front().unwrap();
         assert!(

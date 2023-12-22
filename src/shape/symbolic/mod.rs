@@ -3,6 +3,10 @@ pub mod core_ops;
 use std::hash::Hash;
 use std::{cmp::PartialEq, collections::HashMap, sync::Arc};
 
+use itertools::iproduct;
+
+use crate::{v, izip};
+
 #[derive(Clone, Eq, Debug)]
 pub struct ArcNode(Arc<dyn Node>);
 
@@ -208,6 +212,10 @@ pub trait Node: core::fmt::Debug {
 
     fn render(&self, ops: Arc<dyn NodeOp>, ctx: Option<&str>, strip_paren: bool) -> String;
 
+    fn render_default(&self) -> String {
+        self.render(CStyle::new(), None, false)
+    }
+
     fn vars(&self) -> Vec<ArcNode> {
         vec![]
     }
@@ -225,6 +233,28 @@ pub trait Node: core::fmt::Debug {
     fn get_bounds(&self) -> Option<(isize, isize)> {
         None
     }
+
+    fn expand_idx(&self) -> ArcNode {
+        crate::v![v, for v in self.nodes(), if v.expr().is_some()]
+            .into_iter()
+            .next()
+            .unwrap_or(num(0))
+    }
+
+    fn expand(&self, mut idxs: Option<Vec<ArcNode>>) -> Vec<ArcNode> {
+        if idxs.is_none() {
+            idxs = Some(vec![self.expand_idx()])
+        }
+        v![self.substitute(&HashMap::from_iter(izip!(idxs.as_ref().unwrap().clone(), v![num(x as isize), for x in rep]))), for rep in iter_idxs(idxs.as_ref().unwrap().as_ref())]
+    }
+
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        todo!();
+    }
+}
+
+fn iter_idxs(idxs: &[ArcNode]) -> std::vec::IntoIter<Vec<usize>> {
+    v![x.into_iter().rev().collect(), for x in iproduct!(v![v![x, for x in v.min().unwrap() as usize..(v.max().unwrap() + 1) as usize], for v in idxs.iter().rev()])].into_iter()
 }
 
 pub fn create_node(ret: ArcNode) -> ArcNode {
@@ -367,7 +397,7 @@ pub fn factorize(nodes: Vec<ArcNode>) -> Vec<ArcNode> {
     ret
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Variable {
     expr: String,
     min: isize,
@@ -385,6 +415,15 @@ impl Variable {
 }
 
 impl Node for Variable {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        let sarc = self.to_arc();
+        if let Some(x) = var_vars.get(&sarc) {
+            x.clone()
+        } else {
+            sarc
+        }
+    }
+
     fn is_var(&self) -> bool {
         true
     }
@@ -428,6 +467,9 @@ pub struct SumNode {
 }
 
 impl Node for SumNode {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        sum(&v![node.substitute(var_vars), for node in self.nodes()])
+    }
     // Not sure about this, in sum() there is a check for min or max. but why. what node doesnt
     // have min max and is it safe to do this?
     fn min(&self) -> Option<isize> {
@@ -667,6 +709,14 @@ impl MulNode {
 }
 
 impl Node for MulNode {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        if self.b.is_num() {
+            &self.a.substitute(var_vars) * &self.b
+        } else {
+            &self.a.substitute(var_vars) * &self.b.substitute(var_vars)
+        }
+    }
+
     fn vars(&self) -> Vec<ArcNode> {
         vec![self.a.vars(), self.b.vars()].concat()
     }
@@ -762,6 +812,10 @@ impl NumNode {
 }
 
 impl Node for NumNode {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+       return self.to_arc()
+    }
+
     fn num_val(&self) -> Option<isize> {
         Some(self.b)
     }
@@ -818,6 +872,10 @@ impl DivNode {
 }
 
 impl Node for DivNode {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        self.a.substitute(var_vars) / &self.b
+    }
+
     #[allow(unused_variables)]
     fn _div(&self, rhs: ArcNode, factoring_allowed: Option<bool>) -> ArcNode {
         self.a._div(self.b._mul(rhs), None)
@@ -995,6 +1053,10 @@ impl ModNode {
 }
 
 impl Node for ModNode {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        self.a.substitute(var_vars) % &self.b
+    }
+
     fn vars(&self) -> Vec<ArcNode> {
         vec![self.a.vars(), self.b.vars()].concat()
     }
@@ -1086,6 +1148,19 @@ impl AndNode {
 
 #[allow(unused_variables)]
 impl Node for AndNode {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        let mut subed = vec![];
+        let sarc = self.to_arc();
+        for node in self.nodes() {
+            if let Some(sub) = var_vars.get(&sarc) {
+                subed.push(sub.clone())
+            } else {
+                return num(0)
+            }
+        }
+        ands(&subed)
+    }
+
     fn min(&self) -> Option<isize> {
         self.nodes.iter().map(|n| n.min().unwrap()).min()
     }

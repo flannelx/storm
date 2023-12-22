@@ -1,14 +1,17 @@
 #![allow(non_snake_case)]
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Mutex;
 
 use crate::arg::Arg;
-use crate::dtype::{_bool, float32, int32};
+use crate::device::opencl::CLRenderer;
+use crate::dtype::{_bool, float16, float32, int32};
 use crate::lazy::STArc;
 use crate::ops::{Binary, Ternary, Unary};
 use crate::prelude::*;
+use crate::renderer::cstyle::uops_to_cstyle;
 use crate::shape::symbolic::{num, var, ArcNode};
+use crate::tensor::shape::Shape;
 use crate::{
     dtype,
     lazy::{LOArc, LazyBuffer},
@@ -17,6 +20,11 @@ use crate::{
 };
 
 use super::linearizer::{UOp, UOps};
+
+pub enum ConstNum {
+    Int(i32),
+    Float(f32),
+}
 
 // @dataclass(frozen=True)
 // class MemBuffer:
@@ -74,13 +82,6 @@ pub enum Buffers {
 }
 
 impl Buffers {
-    pub fn realize(&self) -> LazyBuffer {
-        match self {
-            Buffers::LazyBuffer(b) => b.realize(),
-            t => panic!("can not realize non-lazybuffer {t:?}"),
-        }
-    }
-
     pub fn dtype(&self) -> Dtype {
         match self {
             Buffers::MemBuffer(b) => b.dtype.clone(),
@@ -157,6 +158,8 @@ pub struct Kernel {
     pub local_dims: isize,
     pub upcasted: isize,
     pub group_for_reduce: Vec<isize>,
+    pub dont_use_locals: bool,
+    pub local_alias: HashMap<usize, LocalBuffer>,
 }
 
 impl Kernel {
@@ -201,14 +204,14 @@ impl Kernel {
             local_dims: 0,
             upcasted: 0,
             group_for_reduce: vec![],
+            dont_use_locals: false,
+            local_alias: HashMap::new(),
+            //applied_opts: vec![],
         };
         ret.reshape_and_permute(None, Some(permute));
         println!("\nafter reshape_and_permute >>> {:?}\n", ret.sts);
         // # parameters for optimization
         // self.applied_opts: List[Opt] = []
-        // ++++ self.group_for_reduce: List[int] = []
-        // self.upcasted: int = 0
-        // self.local_dims: int = 0
         // self.local_alias: Dict[int, LocalBuffer] = {}
         // self.tensor_core: Optional[TensorCore] = None
         // self.dont_use_locals: bool = False
@@ -349,8 +352,8 @@ pub struct Linearizer {
     pub loop_ops: HashMap<String, UOp>,
     pub name: String,
     pub saved_exprs: HashMap<(UOps, Dtype, Vec<UOp>, Vec<Arg>), UOp>,
-    pub global_size: Option<usize>,
-    pub local_size: Option<usize>,
+    pub global_size: Option<Vec<usize>>,
+    pub local_size: Option<Vec<usize>>,
 }
 
 impl Linearizer {
@@ -474,11 +477,141 @@ impl Linearizer {
         self.global_size = None;
         self.local_size = None;
 
-        let _loop =
+        if self.kernel.dont_use_locals {
+            self.global_size =
+                Some(v![x.max().unwrap() as usize + 1, for x in loop_local_idxs.iter().rev()]);
+            let mut extend_loop_uops = HashMap::new();
+            for (i, x) in loop_global_idxs.iter().enumerate() {
+                extend_loop_uops.insert(
+                    x.expr().unwrap().to_string(),
+                    self.uop_default(
+                        UOps::SPECIAL,
+                        Some(int32),
+                        vec![],
+                        vec![
+                            Arg::Usize(loop_global_idxs.len() - 1 - i),
+                            Arg::Str(x.expr().unwrap().replace("gidx", "idx")),
+                            Arg::Usize(x.max().unwrap() as usize + 1),
+                        ],
+                    ),
+                );
+            }
+            self.loop_ops.extend(extend_loop_uops);
+        } else if self.kernel.opts.has_local {
+            self.global_size =
+                Some(v![(x.max().unwrap() + 1 ) as usize, for x in loop_global_idxs.iter().rev()]);
+            self.local_size =
+                Some(v![(x.max().unwrap() + 1 ) as usize, for x in loop_local_idxs.iter().rev()]);
+
+            let mut extend_loop_uops = HashMap::new();
+            for (i, x) in loop_global_idxs.iter().enumerate() {
+                extend_loop_uops.insert(
+                    x.expr().unwrap().to_string(),
+                    self.uop_default(
+                        UOps::SPECIAL,
+                        Some(int32),
+                        vec![],
+                        vec![
+                            Arg::Usize(loop_global_idxs.len() - 1 - i),
+                            Arg::Str(x.expr().unwrap().to_string()),
+                            Arg::Usize(x.max().unwrap() as usize + 1),
+                        ],
+                    ),
+                );
+            }
+
+            let mut extend_loop_uops = HashMap::new();
+            for (i, x) in loop_local_idxs.iter().enumerate() {
+                extend_loop_uops.insert(
+                    x.expr().unwrap().to_string(),
+                    self.uop_default(
+                        UOps::SPECIAL,
+                        Some(int32),
+                        vec![],
+                        vec![
+                            Arg::Usize(loop_local_idxs.len() - 1 - i),
+                            Arg::Str(x.expr().unwrap().to_string()),
+                            Arg::Usize(x.max().unwrap() as usize + 1),
+                        ],
+                    ),
+                );
+            }
+        } else {
             self.render_loop(&vec![loop_global_idxs.clone(), loop_local_idxs.clone()].concat());
+        }
+
+        let mut loaded_buffser: HashMap<Buffers, Vec<UOp>> = HashMap::new();
+        let mut acc: Vec<UOp> = vec![];
+        let mut load_cache: HashMap<String, UOp> = HashMap::new();
+
+        let mut fake_reduce_idxs: Vec<ArcNode> = vec![];
+
+        println!(">>> KENREL: {:?}", self.kernel.ast);
+
+        if let Some(reduceop) = &self.kernel.reduceop {
+            let reduce_idxs = v![var(&format!("ridx{i}"), 0, self.kernel.full_shape()[i]-1), for i in self.kernel.first_reduce() as usize +self.kernel.group_for_reduce.len()..(self.kernel.shape_len()-self.kernel.upcasted) as usize];
+            let fake_reduce_idxs = v![x*0, for x in reduce_idxs.iter()];
+            let mut seen = HashSet::new();
+            let idxs_tmp = vec![
+                global_idx.clone(),
+                local_idxs.clone(),
+                fake_reduce_idxs.clone(),
+                upcast_idxs.clone(),
+            ]
+            .concat();
+            let mut idxs_gl = vec![];
+            for (i, idx) in idxs_tmp.into_iter().enumerate() {
+                if !seen.contains(&idx) {
+                    idxs_gl.push(idx.clone());
+                }
+                seen.insert(idx);
+            }
+            let acc = self.global_load(
+                0,
+                idxs_gl,
+                Some(get_reduce_acc(
+                    reduceop.optype.clone(),
+                    self.kernel.bufs[0].dtype(),
+                )),
+                None,
+            );
+            // if self.kernel.tensor_core.is_some() {
+            // }
+
+            let loop_ctx = self.render_loop(&reduce_idxs);
+
+            //let mut locals_to_store = vec![];
+            // TODO: local_alias i dont see it gets `appended` anyway
+            //
+            // for i in self.local_alias:
+            //   localbuf_idx = self.bufs.index(self.local_alias[i])
+            //   buf_idxs = [idx*0 if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,self.sts[i].real_strides())]
+            //   if self.tensor_core:
+            //     min_alias_idx = min(self.local_alias.keys())
+            //     replace_input_idxs = calc_tc_idxs(self.tensor_core.thread_local_sizes[i-min_alias_idx], self.tensor_core.thread_local_aliases[i-min_alias_idx])  # noqa: E501
+            //     for n in range(len(self.tensor_core.threads)):
+            //       buf_idxs[self.first_reduce-len(self.tensor_core.threads)+n] = replace_input_idxs[n] # replace locals
+            //     for n in range(len(replace_input_idxs)-len(self.tensor_core.threads)):
+            //       buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[len(self.tensor_core.threads)+n] # replace upcasts
+            //   if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: idxs=", buf_idxs)
+            //   ll = self.global_load(i, buf_idxs)
+            //   locals_to_store.append((localbuf_idx, buf_idxs, ll))
+
+            //if self.kernel.tensor_core //TODO:
+
+            if self.kernel.group_for_reduce.len() > 0 {
+                let fake_global_idx = v![x*0, for x in global_idx.iter()];
+            }
+        }
+
+        // println!("LOOP TOKENS: {:?}", loop_ctx);
+        // println!(
+        //     "RENDERED->: {:?}",
+        //     uops_to_cstyle(CLRenderer::default().renderer, &self.name, loop_ctx)
+        // );
 
         todo!(
-            "{}\n{:?} {:?}\n{:?} {:?}\n{:?}\n{:?}\n{:?}",
+            "{}\n{:?} {:?}\n{:?} {:?}\n{:?}\n{:?}\n",
             self.name,
             global_idx,
             loop_global_idxs,
@@ -486,7 +619,6 @@ impl Linearizer {
             loop_local_idxs,
             full_upcast_idxs,
             upcast_idxs,
-            _loop
         );
     }
 
@@ -519,7 +651,6 @@ impl Linearizer {
     pub fn render_loop(&mut self, xx: &[ArcNode]) -> Vec<UOp> {
         let mut new_loops = HashMap::new();
         for x in xx {
-            println!("{} {x:?}", xx.len());
             if !x.is_num() && x.expr().is_some() {
                 let min = self.const_default(x.min().unwrap().to_string());
                 let max = self.const_default(x.max().unwrap().to_string());
@@ -529,7 +660,6 @@ impl Linearizer {
                 );
             }
         }
-        println!("??????????????/////");
         let ret = new_loops.values().map(|x| x.clone()).collect();
         self.loop_ops.extend(new_loops);
         ret
@@ -677,7 +807,84 @@ impl Linearizer {
         }
         ret
     }
+
+    fn global_load(
+        &self,
+        i: usize,
+        idxs: Vec<ArcNode>,
+        acc: Option<ConstNum>,
+        barrier: Option<UOp>,
+    ) -> Vec<UOp> {
+        let buf = &self.kernel.bufs[i];
+        let localtype = buf.dtype();
+        let const_ = if let Buffers::ConstBuffer(acc) = buf {
+            if localtype.is_int() {
+                ConstNum::Int(acc.val.parse::<i32>().unwrap())
+            } else {
+                ConstNum::Float(acc.val.parse::<f32>().unwrap())
+            }
+        } else {
+            acc.unwrap()
+        };
+
+        let mut amt = 1;
+        let mut dim: Option<isize> = None;
+        let upcast_dim = self.get_upcast_dim(i);
+        let float4_expand = idxs[0].expand(None);
+        if upcast_dim.len() == 1 && (float4_expand.len() == 4 || float4_expand.len() == 2) {
+            dim = Some(upcast_dim[0]);
+            amt = float4_expand.len();
+        }
+
+        println!("\nidxs >>>> {:?}", idxs);
+        let expand_vars = v![rename_var(idx.expand_idx(), &format!("_uidx{j}")), for (j, idx) in idxs.iter().enumerate()];
+        println!("expand_vars >>>> {:?}", expand_vars);
+        let fake_idxs = v![idx.substitute(&HashMap::from([(idx.expand_idx(), ev.clone())])), for (idx, ev) in izip!(idxs.iter(), expand_vars.iter())];
+        println!("fake_idxs >>>> {:?}", fake_idxs);
+        let (mut g_idx, mut g_valid) = if let Some(d) = dim {
+            let d = d as usize;
+            let (mut gidx, mut gvalid) = self.kernel.sts[i].expr_idxs(Some(
+                vec![
+                    &fake_idxs[..d],
+                    &[float4_expand[0].clone()],
+                    &fake_idxs[d + 1..],
+                ]
+                .concat(),
+            ));
+            if (&gidx / &num(amt as isize) * num(amt as isize)).render_default()
+                != gvalid.render_default()
+            {
+                (gidx, gvalid) = self.kernel.sts[i].expr_idxs(Some(fake_idxs.clone()));
+                amt = 1;
+                dim = None;
+            }
+            (gidx, gvalid)
+        } else {
+            self.kernel.sts[i].expr_idxs(Some(fake_idxs.clone()))
+        };
+        if amt > 1 {
+            //TODO: localtype.vectorize()
+        }
+        println!("g_idx >>>> {:?}", g_idx);
+        println!("g_vlid >>>> {:?}", g_valid);
+        todo!()
+    }
+
+    fn global_store(&self, i: usize, idxs: Vec<ArcNode>, store: Option<UOp>) -> Vec<UOp> {
+        let buf = &self.kernel.bufs[i];
+        let buf_uop = &self.buf_ops[i];
+        assert!(buf_uop.is_some(), "buffer {i} wasn't UOped");
+        let expanded_node = v![idx.nodes(), for idx in idxs.iter()];
+        todo!()
+    }
+
+    fn get_upcast_dim(&self, i: usize) -> Vec<isize> {
+        let should_upcast = self.kernel.opts.support_float4
+            && matches!(self.kernel.bufs[i].dtype(), float32 | float16);
+        v![x, for x in self.kernel.sts[i].unit_stride_axes(false), if should_upcast && x >= self.kernel.shape_len()-self.kernel.upcasted && Shape::from(self.kernel.sts[i].shape())[x] > 1]
+    }
 }
+
 lazy_static::lazy_static! {
     pub static ref KERNEL_CNT: Mutex<HashMap<String, usize>> = Default::default();
 }
@@ -708,4 +915,29 @@ fn get_grouped_dims(
         local_idxs.extend(nli.into_iter().rev());
     }
     (local_idxs, v![x, for x in loop_local_idxs, if !x.is_num()])
+}
+
+pub fn get_reduce_acc(op: OpType, dtype: Dtype) -> ConstNum {
+    if op == ops::Reduce::Sum {
+        return if dtype.is_float() {
+            ConstNum::Float(0.0)
+        } else {
+            ConstNum::Int(0)
+        };
+    };
+    if op == ops::Reduce::Max {
+        return if dtype.is_float() {
+            ConstNum::Float(-f32::MAX)
+        } else {
+            ConstNum::Int(-i32::MAX)
+        };
+    };
+    unreachable!();
+}
+
+pub fn rename_var(v: ArcNode, expr: &str) -> ArcNode {
+    if v.is_num() {
+        return v;
+    }
+    var(expr, v.min().unwrap(), v.max().unwrap())
 }

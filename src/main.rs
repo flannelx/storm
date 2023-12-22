@@ -1,6 +1,7 @@
 use storm::prelude::*;
 
 fn main() {
-    let a = Tensor::rand([1_000]);
-    let out = a.to_vec::<f32>();
+    let a = Tensor::rand([16,4,3,3]);
+    let b = Tensor::rand([1,4,3,3]);
+    b.conv2d(&a).realize();
 }

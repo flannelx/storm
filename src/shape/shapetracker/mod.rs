@@ -6,6 +6,8 @@ use std::{
     sync::Arc,
 };
 
+use crate::view;
+
 pub use util::*;
 use view::View;
 
@@ -143,7 +145,10 @@ impl ShapeTracker {
                 return (num(-1), valid);
             }
             valid = v.expr_node_mask(idx.clone(), Some(valid));
+            println!("_expr valid > {:?}", valid.render_default());
+            println!("_expr idx pre  > {:?}", idx.render_default());
             idx = v.expr_node(Some(idx));
+            println!("_expr idx post > {:?}", idx.render_default());
         }
         return (idx, valid);
     }
@@ -173,11 +178,14 @@ impl ShapeTracker {
                 .map(|(i, sh)| var(&format!("idx{}", i), 0, sh - 1))
                 .collect()
         };
+        println!("idxs {:?}", idxs);
         let idx = self.views[self.views.len() - 1].expr_idxs(&idxs);
+        println!("idx > {:?}", idx.render_default());
         let valid = self.views[self.views.len() - 1].expr_node_mask(
             idxs_to_idx(&self.views[self.views.len() - 1].shape, &idxs),
             None,
         );
+        println!("valid > {:?}", valid.render_default());
         self._expr_idx(idx, valid)
     }
 
@@ -237,6 +245,13 @@ impl ShapeTracker {
     pub fn reshape(&self, new_shape: &[isize]) -> Self {
         let new_view = self.views[self.views.len() - 1].reshape(new_shape);
         let mut views = self.views.clone();
+        // let new_view = if new_view.is_none() {
+        //     views.pop();
+        //     view!(new_shape)
+        // } else {
+        //     new_view.unwrap()
+        // };
+        // views.push(new_view);
         if new_view.is_none() {
             let extra = View::new(new_shape, None, None, None);
             if let Some(merged_view) = merge_view(self.views.last().unwrap(), &extra) {
@@ -264,5 +279,9 @@ impl ShapeTracker {
         let p = views.pop().unwrap();
         views.push(p.stride(mul));
         ShapeTracker { views }
+    }
+
+    pub fn unit_stride_axes(&self, ignore_valid: bool) -> Vec<isize> {
+        crate::v![i as isize, for (i, st) in self.real_strides(ignore_valid).iter().enumerate(), if st.is_some_and(|s| s == 1)]
     }
 }

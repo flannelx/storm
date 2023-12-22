@@ -136,16 +136,6 @@ core_impl_num!(Sub, sub, f32, from_f32);
 core_impl_num!(Mul, mul, f32, from_f32);
 core_impl_num!(Div, div, f32, from_f32);
 
-core_impl_num!(Add, add, i32, from_i32);
-core_impl_num!(Sub, sub, i32, from_i32);
-core_impl_num!(Mul, mul, i32, from_i32);
-core_impl_num!(Div, div, i32, from_i32);
-
-core_impl_num!(Add, add, usize, from_usize);
-core_impl_num!(Sub, sub, usize, from_usize);
-core_impl_num!(Mul, mul, usize, from_usize);
-core_impl_num!(Div, div, usize, from_usize);
-
 core_impl_num!(Add, add, isize, from_isize);
 core_impl_num!(Sub, sub, isize, from_isize);
 core_impl_num!(Mul, mul, isize, from_isize);

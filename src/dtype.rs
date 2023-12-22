@@ -332,6 +332,7 @@ pub fn type_to_dtype<T>() -> Dtype {
 pub trait NumType:
     'static
     + core::fmt::Debug
+    + core::fmt::Display
     + Default
     + Copy
     + Send
