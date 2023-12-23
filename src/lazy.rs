@@ -262,81 +262,6 @@ impl LazyBuffer {
         !self.is_realized() && self.base().lazyop.optype == Load::Const
     }
 
-    // pub fn schedule(&self, seen: Option<&mut HashSet<&LazyBuffer>>) -> Vec<ScheduleItem> {
-    //     let mut new_seen = HashSet::new();
-    //     let mut seen = if let Some(s) = seen { s } else { &mut new_seen };
-    //     let mut seen: HashSet<&LazyBuffer> = HashSet::new();
-    //     if seen.contains(&self) || self.is_realized() || self.is_unrealized_const() {
-    //         return vec![];
-    //     }
-    //     seen.insert(&self);
-    //     if self.base.is_none() || self.base.as_ref().unwrap().id != self.id {
-    //         return self.base.as_ref().unwrap().schedule(Some(&mut seen));
-    //     }
-    //     let mut lazyop = if self.lazyop.optype != Load::Contiguous {
-    //         self.lazyop.clone()
-    //     } else {
-    //         LazyOp::new(
-    //             OpType::Unary(Unary::Noop),
-    //             self.lazyop.src.clone(),
-    //             Some(self.lazyop.args.clone()),
-    //         )
-    //     };
-    //     if matches!(self.lazyop.optype, OpType::Binary(_)) {
-    //         lazyop = _ast_binaryops(&lazyop, &self.shape)
-    //     } else if matches!(self.lazyop.optype, OpType::Reduce(_)) {
-    //         lazyop = _ast_reduceops(&lazyop)
-    //     }
-    //     let mut ret = vec![];
-    //     for x in self.lazyop.buffers.iter() {
-    //         ret.extend(x.schedule(Some(&mut seen)));
-    //     }
-    //     // WARN: - this var_vals is produced in this order: here <- Shaptracker <- Views <- Symbolic.
-    //     //         This means the min/max field in Nodes can be Node/Int, which I dont think is
-    //     //         needed, it also makes everything really really ugly and complicated.
-    //     //         And im not sure if that is correct since when creating some of the node
-    //     //         types, you need ordering, and you cant really compare string to int and decide
-    //     //         what is greater/lesser, espeically when that min/max node is a var.
-    //     //       - Check FIXMEs on Mul/Div/Mod node in symbolic file.
-    //     //
-    //     // var_vals = dict(sorted(merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
-    //     todo!()
-    // }
-
-    // pub fn realize(&self) -> Self {
-    //     println!("Realizing LazyBuffer:{:?}", self);
-    //     let mut ret = self.clone();
-    //     if ret.is_realized() {
-    //         return ret;
-    //     }
-    //     //println!("1 ret {:?}", ret);
-    //     match &self.lazyop.optype {
-    //         OpType::Binary(_) => ret.lazyop = _ast_binaryops(&ret.lazyop, &ret.shape).into(),
-    //         OpType::Reduce(_) => ret.lazyop = _ast_reduceops(&ret.lazyop).into(),
-    //         OpType::Load(load) => match load {
-    //             Load::Empty => _realize_empty(self),
-    //             Load::Rand => _realize_rand(self),
-    //             Load::Const => _realize_const(self),
-    //             Load::From => todo!(),
-    //             Load::Contiguous => _realize_contiguous(self),
-    //             Load::Custom => todo!(),
-    //         },
-    //         _ => (),
-    //     }
-    //     //println!("2 ret {:?}", ret);
-    //     if !ret.is_realized() {
-    //         for x in ret.lazyop.buffers.iter_mut() {
-    //             println!("XXX Realizing LazyBuffer:{:?}", x);
-    //             x.realize();
-    //         }
-    //         let mut lin = DEVICE.get_linearizer((*self.lazyop).clone());
-    //         lin.linearize();
-    //         todo!("device exec ast");
-    //     }
-    //     //println!("3 ret {:?}", ret);
-    //     ret
-    // }
-
     pub fn schedule(&self, mut seen: HashSet<Self>) -> VecDeque<ScheduleItem> {
         if seen.contains(self) || self.is_realized() || self.is_unrealized_const() {
             return VecDeque::new();
@@ -362,6 +287,8 @@ impl LazyBuffer {
         //println!("replace_bufferops {:?} {:?}", op, base_bufs);
         //println!("{:?}", ret.len());
         if !matches!(op.optype, OpType::Load(_)) {
+            let info = get_lazyop_info(&op.clone().into());
+            //println!("info.shape{:?} self.shape{:?}", info.shape, self.shape);
             op = LazyOp::new(
                 OpType::Buffer(ops::Buffer::Store),
                 vec![op.clone().into()],
@@ -371,7 +298,7 @@ impl LazyBuffer {
                         dtype: self.dtype.clone(),
                         //WARN: not sure if this is correct 100% of the time for getting shape.
                         //st: ShapeTracker::from_shape(&op.get_lazyops().last().unwrap().args[0].to_buf().st().shape()),
-                        st: ShapeTracker::from_shape(&self.shape),
+                        st: ShapeTracker::from_shape(&info.shape),
                     }
                     .into(),
                 )]),
@@ -439,10 +366,7 @@ impl LazyBuffer {
                 optype,
                 srcs.into_iter().map(|s| s.into()).collect(),
                 Some(
-                    unbound_new_shape
-                        .iter()
-                        .map(|i| Arg::Num(i.to_le_bytes().to_vec()))
-                        .collect::<Vec<Arg>>(),
+                    vec![Arg::Shape(unbound_new_shape.to_vec())]
                 ),
             ),
             self.dtype.clone(),
@@ -1102,7 +1026,7 @@ impl FlopCounter {
             mem: self.mem,
         }
     }
-    fn unaryops_cast(self, arg: Dtype) -> Self {
+    fn unary_cast(self, arg: Dtype) -> Self {
         Self {
             shape: self.shape,
             dtype: arg,
@@ -1111,7 +1035,7 @@ impl FlopCounter {
         }
     }
 
-    fn unaryops(self) -> Self {
+    fn unary(self) -> Self {
         Self {
             dtype: self.dtype,
             flops: self.flops * self.shape.iter().product::<isize>() as usize,
@@ -1120,7 +1044,7 @@ impl FlopCounter {
         }
     }
 
-    fn reduceops(mut self, y: Self) -> Self {
+    fn binary(mut self, y: Self) -> Self {
         self.mem.extend(y.mem);
         Self {
             flops: self.flops + y.flops + self.shape.iter().product::<isize>() as usize,
@@ -1141,7 +1065,7 @@ impl FlopCounter {
         self.mem.extend(y.mem);
         self.mem.extend(z.mem);
         Self {
-            flops: self.flops + y.flops + z.flops +  self.shape.iter().product::<isize>() as usize,
+            flops: self.flops + y.flops + z.flops + self.shape.iter().product::<isize>() as usize,
             shape: self.shape,
             dtype: least_upper_dtype(&[y.dtype.clone(), z.dtype.clone()]),
             mem: self.mem,
@@ -1149,21 +1073,42 @@ impl FlopCounter {
     }
 }
 
-pub fn get_lazyop_info(ast: LazyOpSrc) -> FlopCounter {
-    match ast.optype() {
-        OpType::Unary(u) => todo!(),
-        OpType::Binary(_) => todo!(),
-        OpType::Reduce(_) => todo!(),
-        OpType::Ternary(_) => todo!(),
-        OpType::Movement(_) => todo!(),
-        OpType::Load(_) => todo!(),
-        OpType::Buffer(b) => match b  {
-            ops::Buffer::Load => todo!(),
-            ops::Buffer::Store => todo!(),
-            ops::Buffer::Const => todo!(),
-            ops::Buffer::Mem => todo!(),
+// Well good luck to me debugging this if there are any. LMAO
+pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
+    let srcs = vec![vec![ast.clone()], ast.src()].concat();
+    for o in srcs {
+        match o.optype() {
+            OpType::Unary(_) => return get_lazyop_info(&o).unary(),
+            OpType::Binary(b) => {
+                //println!("-------------------{}", o.lo().src[0].src().len());
+                //let Buffers::LazyBuffer(lb) = o.lo().src[0].lo().args[0].to_buf() else { panic!() };
+                return get_lazyop_info(&o.lo().src[0]).binary(get_lazyop_info(&o.lo().src[1]));
+            }
+            OpType::Reduce(_) => {
+                //println!("REDUCE REDUCE REDUCE\n{:?}", o);
+                return get_lazyop_info(&o.lo().src[0])
+                    .reduce(&o.lo().args[0].shape());
+            }
+            OpType::Ternary(t) => match t {
+                ops::Ternary::Where => return get_lazyop_info(&o).ternary_where(get_lazyop_info(&o.lo().src[0]), get_lazyop_info(&o.lo().src[0])),
+                t => println!("{t:?}"),
+            },
+            OpType::Buffer(b) => match b {
+                ops::Buffer::Load => {
+                    //println!("{:?}", o);
+                    return FlopCounter::buffer_load(&o.lo().args[0].to_buf());
+                }
+                ops::Buffer::Store => {
+                    return get_lazyop_info(&o).buffer_store(&o.lo().args[0].to_buf())
+                }
+                ops::Buffer::Const => {
+                    //println!("CONST CONST CONST\n{:?}", o);
+                    return FlopCounter::buffer_const(&o.lo().args[0].to_buf());
+                }
+                t => println!("{t:?}"),
+            },
+            t => println!("{t:?}"),
         }
-
     }
-    todo!()
+    unreachable!()
 }

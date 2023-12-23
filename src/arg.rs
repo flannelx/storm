@@ -13,9 +13,16 @@ pub enum Arg {
     Num(Vec<u8>), // in little-endian bytes, for devices
     Usize(usize),
     Idx(isize),
+    Shape(Vec<isize>),
 }
 
 impl Arg {
+    pub fn shape(&self) -> Vec<isize> {
+        match self {
+            Arg::Shape(s) => s.clone(),
+            t => panic!("Can not to_shape() {t:?}"),
+        }
+    }
     pub fn to_str(&self) -> String {
         match self {
             Arg::Str(s) => s.clone(),
