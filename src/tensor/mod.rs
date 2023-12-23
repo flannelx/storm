@@ -790,7 +790,7 @@ impl Tensor {
             .collect::<Vec<usize>>();
         x = x.reshape(vec![vec![bs, groups,cin, 1], oyx.clone(), hw.clone()].concat())
              .expand(vec![vec![bs, groups, cin, rcout], oyx.clone(), hw.clone()].concat())
-             .permute(vec![vec![0,1,3], v![4+1, for i in 0..oyx.len()], vec![2], v![4+oyx.len()+i, for i in 0..hw.len()]].concat());
+             .permute(vec![vec![0,1,3], v![4+i, for i in 0..oyx.len()], vec![2], v![4+oyx.len()+i, for i in 0..hw.len()]].concat());
         // ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
         x = (x*weight.reshape(vec![vec![1, groups, rcout], vec![1;oyx.len()], vec![cin], hw.clone()].concat()))._sum(v![-1-i as isize, for i in 0..1+oyx.len()], true).reshape(vec![vec![bs, cout], oyx.clone()].concat());
 
