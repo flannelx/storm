@@ -32,63 +32,7 @@ pub struct CstyleLanguage {
     pub launch_bounds: bool,
 }
 
-impl Op for CstyleLanguage {
-    fn neg(&self, x: &str) -> String {
-        format!("(-{x})")
-    }
-
-    fn exp2(&self, x: &str) -> String {
-        format!("exp2({x})")
-    }
-
-    fn log2(&self, x: &str) -> String {
-        format!("log2({x})")
-    }
-
-    fn sin(&self, x: &str) -> String {
-        format!("sin({x})")
-    }
-
-    fn sqrt(&self, x: &str) -> String {
-        format!("sqrt({x})")
-    }
-
-    fn add(&self, a: &str, b: &str) -> String {
-        format!("({a}+{b})")
-    }
-
-    fn sub(&self, a: &str, b: &str) -> String {
-        format!("({a}-{b})")
-    }
-
-    fn mul(&self, a: &str, b: &str) -> String {
-        format!("({a}*{b})")
-    }
-
-    fn div(&self, a: &str, b: &str) -> String {
-        format!("({a}/{b})")
-    }
-
-    fn _mod(&self, a: &str, b: &str) -> String {
-        format!("({a}%{b})")
-    }
-
-    fn cmpmax(&self, a: &str, b: &str) -> String {
-        format!("max({a},{b})")
-    }
-
-    fn cmplt(&self, a: &str, b: &str) -> String {
-        format!("({a}<{b})")
-    }
-
-    fn mulacc(&self, a: &str, b: &str, c: &str) -> String {
-        format!("(({a}*{b})+{c})")
-    }
-
-    fn _where(&self, a: &str, b: &str, c: &str) -> String {
-        format!("({a}!=0?{b}:{c})")
-    }
-}
+impl Op for CstyleLanguage { }
 
 pub struct FloatInt {
     pub float: f64,
@@ -314,7 +258,7 @@ impl CstyleLanguage {
     }
 }
 
-pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>) -> String {
+pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -> String {
     let mut local_size: Vec<usize> = vec![];
     let mut kernel: Vec<String> = vec![];
     let mut prekernel: Vec<String> = vec![];
@@ -606,8 +550,4 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: Vec<UOp>)
         }
     }
     lang.render_kernel(function_name, &kernel, &bufs, &local_size, &prekernel)
-}
-
-#[test]
-fn cstyle_render_test() {
 }

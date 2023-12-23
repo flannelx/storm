@@ -139,20 +139,6 @@ impl ShapeTracker {
         ret
     }
 
-    pub fn _expr_idx(&self, mut idx: ArcNode, mut valid: ArcNode) -> (ArcNode, ArcNode) {
-        for v in self.views[0..self.views.len() - 1].iter().rev() {
-            if valid.max().unwrap() == 0 {
-                return (num(-1), valid);
-            }
-            valid = v.expr_node_mask(idx.clone(), Some(valid));
-            println!("_expr valid > {:?}", valid.render_default());
-            println!("_expr idx pre  > {:?}", idx.render_default());
-            idx = v.expr_node(Some(idx));
-            println!("_expr idx post > {:?}", idx.render_default());
-        }
-        return (idx, valid);
-    }
-
     pub fn simplify(&self) -> Self {
         if self.views.len() < 2 {
             return self.clone();
@@ -168,6 +154,17 @@ impl ShapeTracker {
         ret
     }
 
+    pub fn _expr_idx(&self, mut idx: ArcNode, mut valid: ArcNode) -> (ArcNode, ArcNode) {
+        for v in self.views[0..self.views.len() - 1].iter().rev() {
+            if valid.max().unwrap() == 0 {
+                return (num(-1), valid);
+            }
+            valid = v.expr_node_mask(idx.clone(), Some(valid));
+            idx = v.expr_node(Some(idx));
+        }
+        return (idx, valid);
+    }
+
     pub fn expr_idxs(&self, idxs: Option<Vec<ArcNode>>) -> (ArcNode, ArcNode) {
         let idxs = if let Some(i) = idxs {
             i
@@ -178,14 +175,11 @@ impl ShapeTracker {
                 .map(|(i, sh)| var(&format!("idx{}", i), 0, sh - 1))
                 .collect()
         };
-        println!("idxs {:?}", idxs);
         let idx = self.views[self.views.len() - 1].expr_idxs(&idxs);
-        println!("idx > {:?}", idx.render_default());
         let valid = self.views[self.views.len() - 1].expr_node_mask(
             idxs_to_idx(&self.views[self.views.len() - 1].shape, &idxs),
             None,
         );
-        println!("valid > {:?}", valid.render_default());
         self._expr_idx(idx, valid)
     }
 
@@ -245,25 +239,27 @@ impl ShapeTracker {
     pub fn reshape(&self, new_shape: &[isize]) -> Self {
         let new_view = self.views[self.views.len() - 1].reshape(new_shape);
         let mut views = self.views.clone();
-        // let new_view = if new_view.is_none() {
-        //     views.pop();
-        //     view!(new_shape)
-        // } else {
-        //     new_view.unwrap()
-        // };
-        // views.push(new_view);
-        if new_view.is_none() {
-            let extra = View::new(new_shape, None, None, None);
-            if let Some(merged_view) = merge_view(self.views.last().unwrap(), &extra) {
-                views.pop();
-                views.push(merged_view);
-            } else {
-                views.push(extra);
+        if let Some(nv) = new_view {
+            if nv.strides == [0, 41, 160, 6560, 25600, 0] {
+                panic!()
             }
-        } else {
             views.pop();
-            views.push(new_view.unwrap());
+            views.push(nv);
+            return ShapeTracker { views } ;
         }
+        views.push(view!(new_shape));
+        // if new_view.is_none() {
+        //     let extra = View::new(new_shape, None, None, None);
+        //     if let Some(merged_view) = merge_view(self.views.last().unwrap(), &extra) {
+        //         views.pop();
+        //         views.push(merged_view);
+        //     } else {
+        //         views.push(extra);
+        //     }
+        // } else {
+        //     views.pop();
+        //     views.push(new_view.unwrap());
+        // }
         ShapeTracker { views }
     }
 

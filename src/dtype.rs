@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use half::{bf16, f16};
 
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash, Default)]
 pub struct Dtype {
     pub priority: usize,
     pub size: usize,

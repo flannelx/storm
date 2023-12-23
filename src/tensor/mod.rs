@@ -9,6 +9,7 @@ use crate::arg::Arg;
 use crate::dtype::type_to_dtype;
 use crate::dtype::NumType;
 use crate::lazy::run_schedule;
+use crate::ops::LazyOp;
 use crate::ops::Load;
 use crate::ops::OpType;
 use crate::prelude::*;
@@ -185,14 +186,24 @@ impl Tensor {
 
     pub fn rand<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::_load(
+        Self::from_buf(
+        LazyBuffer::new(
+            "GPU",
+            crate::shape::ShapeTracker::from_shape(&shape.dims),
             OpType::Load(Load::Rand),
-            shape.numel(),
+            LazyOp::new(OpType::Load(Load::Rand), vec![], None),
             type_to_dtype::<TensorDefaultType>(),
             None,
             None,
-        )
-        .reshape(shape)
+        ))
+        // Self::_load(
+        //     OpType::Load(Load::Rand),
+        //     shape.numel(),
+        //     type_to_dtype::<TensorDefaultType>(),
+        //     None,
+        //     None,
+        // )
+        // .reshape(shape)
     }
 
     pub fn randn<S: Into<Shape>>(shape: S) -> Self {
@@ -735,13 +746,6 @@ impl Tensor {
         dilation: usize,
         padding: V,
     ) -> Self {
-        // assert!(self.shape().len() == 4, "conv2d weight should be 4d");
-        // let shape = self.shape();
-        // let bs = shape[0] as usize;
-        // let cin_ = shape[1] as usize;
-        // let cout = weight.shape()[0] as usize;
-        // let cin = weight.shape()[1] as usize;
-        // let hw = [shape[2] as usize, shape[3] as usize];
         let [bs, cin_] = self.shape().dims[..2] else {
             panic!()
         };

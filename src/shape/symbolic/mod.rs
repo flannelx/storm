@@ -8,7 +8,7 @@ use itertools::iproduct;
 use crate::{v, izip};
 
 #[derive(Clone, Eq, Debug)]
-pub struct ArcNode(Arc<dyn Node>);
+pub struct ArcNode(pub Arc<dyn Node>);
 
 impl PartialEq for ArcNode {
     fn eq(&self, other: &Self) -> bool {
@@ -235,7 +235,7 @@ pub trait Node: core::fmt::Debug {
     }
 
     fn expand_idx(&self) -> ArcNode {
-        crate::v![v, for v in self.nodes(), if v.expr().is_some()]
+        crate::v![v, for v in self.nodes(), if v.expr().is_none()]
             .into_iter()
             .next()
             .unwrap_or(num(0))
@@ -253,7 +253,7 @@ pub trait Node: core::fmt::Debug {
     }
 }
 
-fn iter_idxs(idxs: &[ArcNode]) -> std::vec::IntoIter<Vec<usize>> {
+pub fn iter_idxs(idxs: &[ArcNode]) -> std::vec::IntoIter<Vec<usize>> {
     v![x.into_iter().rev().collect(), for x in iproduct!(v![v![x, for x in v.min().unwrap() as usize..(v.max().unwrap() + 1) as usize], for v in idxs.iter().rev()])].into_iter()
 }
 
@@ -1217,7 +1217,7 @@ impl Node for AndNode {
 }
 
 #[allow(unused_variables)]
-pub trait NodeOp {
+pub trait NodeOp: 'static + core::fmt::Debug {
     fn variable(&self, s: ArcNode, ctx: Option<&str>) -> String {
         // Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
         if ctx.is_some_and(|f| f == "DEBUG") {
@@ -1294,6 +1294,7 @@ pub trait NodeOp {
     fn to_arc(&self) -> Arc<dyn NodeOp>;
 }
 
+#[derive(Debug, Clone)]
 pub struct CStyle;
 #[allow(dead_code)]
 impl CStyle {
@@ -1307,6 +1308,7 @@ impl NodeOp for CStyle {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Python;
 #[allow(dead_code)]
 impl Python {

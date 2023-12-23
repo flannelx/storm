@@ -5,7 +5,9 @@ use std::sync::Arc;
 use half::f16;
 use rand::Rng;
 
+use crate::codegen::kernel::Buffers;
 use crate::codegen::kernel::{ConstBuffer, MemBuffer};
+use crate::dtype::least_upper_dtype;
 use crate::ops::{self, ScheduleItem};
 use crate::prelude::*;
 use crate::{
@@ -362,12 +364,14 @@ impl LazyBuffer {
         if !matches!(op.optype, OpType::Load(_)) {
             op = LazyOp::new(
                 OpType::Buffer(ops::Buffer::Store),
-                vec![op.into()],
+                vec![op.clone().into()],
                 Some(vec![Arg::Buffer(
                     MemBuffer {
                         idx: 0,
                         dtype: self.dtype.clone(),
-                        st: ShapeTracker::from_shape(&self.base().shape),
+                        //WARN: not sure if this is correct 100% of the time for getting shape.
+                        //st: ShapeTracker::from_shape(&op.get_lazyops().last().unwrap().args[0].to_buf().st().shape()),
+                        st: ShapeTracker::from_shape(&self.shape),
                     }
                     .into(),
                 )]),
@@ -383,8 +387,8 @@ impl LazyBuffer {
 
     pub fn e<O: Into<OpType>>(&self, optype: O, srcs: &[Self], arg: Option<Vec<Arg>>) -> Self {
         let optype = optype.into();
-        let srcs: Vec<LazyBuffer> = vec![&[self.clone()], srcs].concat();
-        _push_movement_ops(&srcs.iter().map(|s| s).collect::<Vec<&Self>>());
+        let mut srcs: Vec<LazyBuffer> = vec![&[self.clone()], srcs].concat();
+        srcs = _push_movement_ops(&srcs.iter().map(|s| s).collect::<Vec<&Self>>());
         let out_device = srcs[0].device.clone();
         let out_shape = srcs[0].shape.clone();
         let out_dtype = v![s, for s in srcs.iter()]
@@ -793,7 +797,7 @@ fn _ast_binaryops(op: &LazyOp, shape: &[isize]) -> LazyOp {
             }
         };
         if psrc.0.shape != psrc.1.shape {
-            intermediate_shape = shape;
+            intermediate_shape = &psrc.1.shape;
         }
     }
     for (k, v) in real_srcs.iter_mut() {
@@ -862,9 +866,8 @@ fn _push_movement_ops(srcs: &[&LazyBuffer]) -> Vec<LazyBuffer> {
             && mops.iter().all(|m| m.0 != Movement::Pad)
         {
             todo!()
-        } else {
-            new_srcs.push((*x).clone());
         }
+        new_srcs.push((*x).clone());
     }
     new_srcs
 }
@@ -1032,51 +1035,7 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
     (ret_op.lo().clone(), base_bufs)
 }
 
-pub struct FlopCounter {
-    shape: Vec<isize>,
-    dtype: Dtype,
-    flops: usize,
-    mem: HashMap<usize, usize>,
-}
-impl FlopCounter {
-    pub fn mem_estimate(&self) -> usize {
-        self.mem.values().sum()
-    }
-}
-use crate::codegen::kernel::Buffers;
-pub fn ast_walk_flops(
-    op: Arg,
-    shape: &[isize],
-    dtype: Dtype,
-    flops: usize,
-    mem: HashMap<usize, usize>,
-) -> (Vec<isize>, Dtype, usize, HashMap<usize, usize>) {
-    match op {
-        Arg::Op(lo) => match lo.optype {
-            OpType::Unary(_) | OpType::Binary(_) | OpType::Reduce(_) => todo!(),
-            OpType::Ternary(_) => todo!(),
-            //OpType::Movement(_) => todo!(),
-            t => panic!("{t:?} replace_bufferops didnt work?"),
-        },
-        Arg::Buffer(b) => match b {
-            Buffers::MemBuffer(_) => todo!(),
-            Buffers::ConstBuffer(_) => todo!(),
-            Buffers::LazyBuffer(_) => todo!(),
-            Buffers::LocalBuffer(_) => todo!(),
-        },
-        t => panic!("{t:?} should not be in here"),
-    }
-}
-
-pub fn get_lazyop_info(ast: LazyOp) -> FlopCounter {
-    todo!()
-}
-
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
-    println!("Schedule items: >>> ");
-    for s in schedule.iter() {
-        println!("{:?}",s.ast.optype)
-    }
     while !schedule.is_empty() {
         let si = schedule.pop_front().unwrap();
         assert!(
@@ -1088,22 +1047,123 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
         match &si.ast.optype {
             OpType::Load(l) => {
                 match l {
-                    Load::Empty => _realize_empty(&si.out),
                     Load::Rand => _realize_rand(&si.out),
                     Load::Const => _realize_const(&si.out),
                     Load::From => _realize_from(&si.out),
-                    Load::Contiguous => todo!(),
                     Load::Custom => todo!(),
+                    _ => (),
                 }
                 continue;
             }
             _ => (),
         }
 
-        let mut lin = DEVICE.get_linearizer(si.ast.clone());
-        lin.linearize();
-        println!("Lin name: {} Lin runtime args: {:?}", lin.name, lin.uops);
+        let (name, prg) = DEVICE.render(si.ast.clone());
+        println!("{}\n{}", name, prg)
 
         //let prg = DEVICE.build(name, program)
     }
+}
+
+#[derive(Default, Debug)]
+pub struct FlopCounter {
+    shape: Vec<isize>,
+    dtype: Dtype,
+    flops: usize,
+    mem: HashMap<usize, usize>,
+}
+
+impl FlopCounter {
+    pub fn mem_estimate(&self) -> usize {
+        self.mem.values().sum()
+    }
+
+    fn buffer_load(arg: &Buffers) -> Self {
+        Self {
+            shape: arg.st().shape(),
+            dtype: arg.dtype(),
+            flops: 0,
+            mem: HashMap::from([(arg.idx(), arg.dtype().size * arg.st().size() as usize)]),
+        }
+    }
+    fn buffer_const(arg: &Buffers) -> Self {
+        Self {
+            shape: arg.st().shape(),
+            dtype: arg.dtype(),
+            flops: 0,
+            mem: HashMap::new(),
+        }
+    }
+    fn buffer_store(self, arg: &Buffers) -> Self {
+        Self {
+            shape: arg.st().shape(),
+            dtype: arg.dtype(),
+            flops: self.flops,
+            mem: self.mem,
+        }
+    }
+    fn unaryops_cast(self, arg: Dtype) -> Self {
+        Self {
+            shape: self.shape,
+            dtype: arg,
+            flops: self.flops,
+            mem: self.mem,
+        }
+    }
+
+    fn unaryops(self) -> Self {
+        Self {
+            dtype: self.dtype,
+            flops: self.flops * self.shape.iter().product::<isize>() as usize,
+            shape: self.shape,
+            mem: self.mem,
+        }
+    }
+
+    fn reduceops(mut self, y: Self) -> Self {
+        self.mem.extend(y.mem);
+        Self {
+            flops: self.flops + y.flops + self.shape.iter().product::<isize>() as usize,
+            shape: self.shape,
+            dtype: least_upper_dtype(&[self.dtype.clone(), y.dtype.clone()]),
+            mem: self.mem,
+        }
+    }
+    fn reduce(self, new_shape: &[isize]) -> Self {
+        Self {
+            shape: new_shape.to_vec(),
+            dtype: self.dtype,
+            flops: self.flops * self.shape.iter().product::<isize>() as usize,
+            mem: self.mem,
+        }
+    }
+    fn ternary_where(mut self, y: Self, z: Self) -> Self {
+        self.mem.extend(y.mem);
+        self.mem.extend(z.mem);
+        Self {
+            flops: self.flops + y.flops + z.flops +  self.shape.iter().product::<isize>() as usize,
+            shape: self.shape,
+            dtype: least_upper_dtype(&[y.dtype.clone(), z.dtype.clone()]),
+            mem: self.mem,
+        }
+    }
+}
+
+pub fn get_lazyop_info(ast: LazyOpSrc) -> FlopCounter {
+    match ast.optype() {
+        OpType::Unary(u) => todo!(),
+        OpType::Binary(_) => todo!(),
+        OpType::Reduce(_) => todo!(),
+        OpType::Ternary(_) => todo!(),
+        OpType::Movement(_) => todo!(),
+        OpType::Load(_) => todo!(),
+        OpType::Buffer(b) => match b  {
+            ops::Buffer::Load => todo!(),
+            ops::Buffer::Store => todo!(),
+            ops::Buffer::Const => todo!(),
+            ops::Buffer::Mem => todo!(),
+        }
+
+    }
+    todo!()
 }

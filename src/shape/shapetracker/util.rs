@@ -48,9 +48,8 @@ pub fn _merge_dims(
     } else {
         0
     };
-    let start_i = 1;
     for (i, (&sh, &st)) in izip!(shape[1..].iter(), strides[1..].iter()).enumerate() {
-        let i = start_i + i;
+        let i = i;
         if sh == 1 {
             continue;
         }
@@ -58,18 +57,17 @@ pub fn _merge_dims(
             *ret.last_mut().unwrap() = (
                 ret[ret.len() - 1].0 * sh,
                 st,
-                if state == 1 {
-                    sh
-                } else {
-                    if st > 0 {
-                        ret[ret.len() - 1].2 * sh
+                if st > 0 {
+                    if state == 1 {
+                        sh
                     } else {
-                        0
+                        ret[ret.len() - 1].2 * sh
                     }
+                } else {
+                    0
                 },
             );
-        }
-        else {
+        } else {
             ret.push((sh, st, if st > 0 { sh } else { 0 }));
         }
         state = if let Some(ref m) = mask {
@@ -79,7 +77,7 @@ pub fn _merge_dims(
                 0
             }
         } else {
-            if state !=0 {
+            if state != 0 {
                 2
             } else {
                 0

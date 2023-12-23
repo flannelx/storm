@@ -1,6 +1,6 @@
 use super::util::*;
-use crate::shape::symbolic::{ands, num, sum, var, ArcNode};
 use crate::prelude::*;
+use crate::shape::symbolic::{ands, num, sum, var, ArcNode};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct View {
@@ -65,9 +65,7 @@ impl View {
             ret.push(num(self.offset));
         }
         let mut acc = 1;
-        println!(">>>>>>>>>{:?} {:?}<<<<<<<<<", self.shape, self.strides);
         for &(d, s, _) in _merge_dims(&self.shape, &self.strides, None).iter().rev() {
-            println!(">>>>>>>>>{d} {s}<<<<<<<<<");
             ret.push(((&idx / acc) % d) * s);
             acc *= d;
         }
@@ -142,7 +140,12 @@ impl View {
             .iter()
             .zip(arg.iter())
             .all(|(&sh, &(b, e))| b >= 0 && e <= sh));
-        assert!(arg.len() == self.shape.len(), "{:?}.len() != {:?}.len()", arg, self.shape);
+        assert!(
+            arg.len() == self.shape.len(),
+            "{:?}.len() != {:?}.len()",
+            arg,
+            self.shape
+        );
         self.__unsafe_resize(arg, None)
     }
 
@@ -187,91 +190,133 @@ impl View {
         }
         assert!(new_shape.iter().all(|&sh| sh > 0));
         if self.shape.contains(&0) {
-            assert!(new_shape.contains(&0), "cannot reshape 0 size to {new_shape:?}");
+            assert!(
+                new_shape.contains(&0),
+                "cannot reshape 0 size to {new_shape:?}"
+            );
             return Some(view!(new_shape));
         }
         //assert!(self.shape.iter().product::<isize>() == new_shape.iter().product::<isize>());
-        if new_shape.len() == 0 && self.mask.is_some() && v![0, for x in self.mask.as_ref().unwrap(), if x.0==x.1].len() > 0 {
-            return None
+        if new_shape.len() == 0
+            && self.mask.is_some()
+            && v![0, for x in self.mask.as_ref().unwrap(), if x.0==x.1].len() > 0
+        {
+            return None;
         }
         if self.contiguous {
             return Some(view!(new_shape));
         }
 
-        if self
-            .shape
-            .iter()
-            .filter(|&&x| x != 1)
-            .eq(new_shape.iter().filter(|&&x| x != 1))
+        // if self
+        //     .shape
+        //     .iter()
+        //     .filter(|&&x| x != 1)
+        //     .eq(new_shape.iter().filter(|&&x| x != 1))
+        // {
+        //     let mut new_strides: Vec<isize> = self
+        //         .shape
+        //         .iter()
+        //         .zip(self.strides.iter())
+        //         .filter(|(&x, _)| x != 1)
+        //         .rev()
+        //         .map(|(_, &y)| y)
+        //         .collect();
+        //     let new_strides_tuple: Vec<isize> = new_shape
+        //         .iter()
+        //         .map(|&x| {
+        //             if x == 1 {
+        //                 0
+        //             } else {
+        //                 new_strides.pop().unwrap()
+        //             }
+        //         })
+        //         .collect();
+        //     let mut new_mask_tuple = None;
+        //     if let Some(m) = &self.mask {
+        //         for (&x, &y) in self.shape.iter().zip(m.iter()) {
+        //             if x == 1 && y != (0, 1) {
+        //                 new_mask_tuple = Some(vec![(0, 0); new_shape.len()]);
+        //                 break;
+        //             }
+        //         }
+        //         if new_mask_tuple.is_none() {
+        //             let mut new_mask: Vec<(isize, isize)> = self
+        //                 .shape
+        //                 .iter()
+        //                 .zip(m.iter())
+        //                 .filter(|(&sh, _)| sh != 1)
+        //                 .map(|(_, &mm)| mm)
+        //                 .rev()
+        //                 .collect();
+        //             new_mask_tuple = Some(
+        //                 new_shape
+        //                     .iter()
+        //                     .map(|&x| {
+        //                         if x == 1 {
+        //                             (0, 1)
+        //                         } else {
+        //                             new_mask.pop().unwrap()
+        //                         }
+        //                     })
+        //                     .collect::<Vec<(isize, isize)>>(),
+        //             );
+        //         }
+        //     }
+        //     return Some(View::new(
+        //         new_shape,
+        //         Some(new_strides_tuple),
+        //         Some(self.offset),
+        //         new_mask_tuple,
+        //     ));
+        // }
+        let mut strides = vec![];
+        let r_new_shape: Vec<isize> = new_shape.iter().rev().map(|i| *i).collect();
+        let mut _break = false;
+        let mut r_new_shape_iter = r_new_shape.iter().peekable();
+        for (merged_dim, s, real_dim) in _merge_dims(&self.shape, &self.strides, self.mask.clone())
+            .into_iter()
+            .rev()
         {
-            let mut new_strides: Vec<isize> = self
-                .shape
-                .iter()
-                .zip(self.strides.iter())
-                .filter(|(&x, _)| x != 1)
-                .rev()
-                .map(|(_, &y)| y)
-                .collect();
-            let new_strides_tuple: Vec<isize> = new_shape
-                .iter()
-                .map(|&x| {
-                    if x == 1 {
-                        0
-                    } else {
-                        new_strides.pop().unwrap()
-                    }
-                })
-                .collect();
-            let mut new_mask_tuple = None;
-            if let Some(m) = &self.mask {
-                for (&x, &y) in self.shape.iter().zip(m.iter()) {
-                    if x == 1 && y != (0, 1) {
-                        new_mask_tuple = Some(vec![(0, 0); new_shape.len()]);
-                        break;
-                    }
+            let mut acc = 1;
+            let mut new_stride = s;
+            while acc <= merged_dim && acc != merged_dim && r_new_shape_iter.peek().is_some() {
+                let new_dim = *r_new_shape_iter.next().unwrap();
+                strides.push(if new_dim != 1 { new_stride } else { 0 });
+                if new_dim == 1 {
+                    continue;
                 }
-                if new_mask_tuple.is_none() {
-                    let mut new_mask: Vec<(isize, isize)> = self
-                        .shape
-                        .iter()
-                        .zip(m.iter())
-                        .filter(|(&sh, _)| sh != 1)
-                        .map(|(_, &mm)| mm)
-                        .rev()
-                        .collect();
-                    new_mask_tuple = Some(
-                        new_shape
-                            .iter()
-                            .map(|&x| {
-                                if x == 1 {
-                                    (0, 1)
-                                } else {
-                                    new_mask.pop().unwrap()
-                                }
-                            })
-                            .collect::<Vec<(isize, isize)>>(),
-                    );
-                }
+                acc *= new_dim;
+                new_stride *= if acc < real_dim { new_dim } else { 0 };
             }
-            return Some(View::new(
-                new_shape,
-                Some(new_strides_tuple),
-                Some(self.offset),
-                new_mask_tuple,
-            ));
+            if acc != merged_dim {
+                _break = true;
+                break;
+            }
+        }
+        if !_break {
+            strides.extend(vec![0; new_shape.len() - strides.len()]);
+            strides.reverse();
+            return Some(View::new(new_shape, Some(strides), Some(self.offset), None));
         }
         None
     }
 
     pub fn permute(&self, axis: &[isize]) -> Self {
-
-    // return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None)  # noqa: E501
+        // return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None)  # noqa: E501
+        if axis == [0, 1, 3, 5, 5, 2, 6, 7] {
+            panic!()
+        }
         let new_mask = if let Some(m) = &self.mask {
             Some(v![m[*a as usize], for a in axis])
         } else {
             None
         };
-        View::new(&v![self.shape[*a as usize], for a in axis], Some(v![self.strides[*a as usize], for a in axis]), Some(self.offset), new_mask)
+        View::new(
+            &v![self.shape[*a as usize], for a in axis],
+            Some(v![self.strides[*a as usize], for a in axis]),
+            Some(self.offset),
+            new_mask,
+        )
         // let mut new_shape = vec![];
         // let mut new_stride = vec![];
         // let mut new_mask = vec![];

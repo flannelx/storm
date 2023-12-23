@@ -8,44 +8,61 @@ use crate::{
 
 #[allow(unused_variables)]
 pub trait Op: 'static + core::fmt::Debug + Send + Sync {
-    // Unary
+
     fn neg(&self, x: &str) -> String {
-        unimplemented!()
-    }
-    fn exp2(&self, x: &str) -> String {
-        unimplemented!()
-    }
-    fn log2(&self, x: &str) -> String {
-        unimplemented!()
-    }
-    fn sin(&self, x: &str) -> String {
-        unimplemented!()
-    }
-    fn sqrt(&self, x: &str) -> String {
-        unimplemented!()
+        format!("(-{x})")
     }
 
-    // Binary
+    fn exp2(&self, x: &str) -> String {
+        format!("exp2({x})")
+    }
+
+    fn log2(&self, x: &str) -> String {
+        format!("log2({x})")
+    }
+
+    fn sin(&self, x: &str) -> String {
+        format!("sin({x})")
+    }
+
+    fn sqrt(&self, x: &str) -> String {
+        format!("sqrt({x})")
+    }
+
     fn add(&self, a: &str, b: &str) -> String {
-        unimplemented!()
+        format!("({a}+{b})")
     }
+
     fn sub(&self, a: &str, b: &str) -> String {
-        unimplemented!()
+        format!("({a}-{b})")
     }
+
     fn mul(&self, a: &str, b: &str) -> String {
-        unimplemented!()
+        format!("({a}*{b})")
     }
+
     fn div(&self, a: &str, b: &str) -> String {
-        unimplemented!()
+        format!("({a}/{b})")
     }
+
     fn _mod(&self, a: &str, b: &str) -> String {
-        unimplemented!()
+        format!("({a}%{b})")
     }
+
     fn cmpmax(&self, a: &str, b: &str) -> String {
-        unimplemented!()
+        format!("max({a},{b})")
     }
+
     fn cmplt(&self, a: &str, b: &str) -> String {
-        unimplemented!()
+        format!("({a}<{b})")
+    }
+
+    fn mulacc(&self, a: &str, b: &str, c: &str) -> String {
+        format!("(({a}*{b})+{c})")
+    }
+
+    fn _where(&self, a: &str, b: &str, c: &str) -> String {
+        format!("({a}!=0?{b}:{c})")
     }
 
     // Reduce
@@ -53,14 +70,6 @@ pub trait Op: 'static + core::fmt::Debug + Send + Sync {
         unimplemented!()
     }
     fn max(&self, x: &str, shape: Vec<isize>) -> String {
-        unimplemented!()
-    }
-
-    // Ternary
-    fn mulacc(&self, a: &str, b: &str, c: &str) -> String {
-        unimplemented!()
-    }
-    fn _where(&self, a: &str, b: &str, c: &str) -> String {
         unimplemented!()
     }
 
@@ -352,9 +361,7 @@ impl LazyOp {
             let ss = y.map_buffers(real_srcs);
             srcs.push(ss);
         }
-        let ret = LazyOp::new(self.optype.clone(), srcs, Some(self.args.clone()));
-        println!(">>>>>>> {ret:?}");
-        ret.into()
+        LazyOp::new(self.optype.clone(), srcs, Some(self.args.clone())).into()
     }
 
     pub fn get_lazyops(&self) -> Vec<LazyOp> {

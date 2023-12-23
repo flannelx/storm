@@ -96,6 +96,7 @@ mod test_index_expr_2d {
     use std::sync::Arc;
 
     use crate::ShapeTracker;
+    use itertools::iproduct;
     use storm::shape::shapetracker::view::View;
     use storm::shape::symbolic::var;
     use storm::shape::symbolic::ArcNode;

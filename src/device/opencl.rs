@@ -9,6 +9,7 @@ use opencl3::types::{CL_BLOCKING, CL_NON_BLOCKING};
 
 use crate::prelude::*;
 use crate::renderer::cstyle::CstyleLanguage;
+use crate::shape::symbolic::CStyle;
 
 use super::{Buffer, Device, Program};
 
@@ -170,30 +171,21 @@ impl Device for CLDevice {
         opencl3::command_queue::finish(self.queue.get()).expect("Queue finish failed");
         PENDING_COPY.lock().unwrap().0.clear();
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct CLRenderer {
-    pub renderer: CstyleLanguage,
-}
-
-impl Default for CLRenderer {
-    fn default() -> Self {
-        Self {
-            renderer: CstyleLanguage {
-                kernel_prefix: "__kernel ".into(),
-                buffer_prefix: "__global ".into(),
-                smem_align: "__attribute__ ((aligned (16))) ".into(),
-                smem_prefix: "__local ".into(),
-                arg_int_prefix: "const int".into(),
-                half_prekernel: Some("#pragma OPENCL EXTENSION cl_khr_fp16 : enable".into()),
-                barrier: "barrier(CLK_LOCAL_MEM_FENCE);".into(),
-                float4: Some("(float4)".into()),
-                gid: (0..3).map(|i| format!("get_group_id({i})")).collect(),
-                lid: (0..3).map(|i| format!("get_local_id({i})")).collect(),
-                uses_vload: true,
-                ..Default::default()
-            },
+    fn renderer(&self) -> CstyleLanguage {
+        CstyleLanguage {
+            kernel_prefix: "__kernel ".into(),
+            buffer_prefix: "__global ".into(),
+            smem_align: "__attribute__ ((aligned (16))) ".into(),
+            smem_prefix: "__local ".into(),
+            arg_int_prefix: "const int".into(),
+            half_prekernel: Some("#pragma OPENCL EXTENSION cl_khr_fp16 : enable".into()),
+            barrier: "barrier(CLK_LOCAL_MEM_FENCE);".into(),
+            float4: Some("(float4)".into()),
+            gid: (0..3).map(|i| format!("get_group_id({i})")).collect(),
+            lid: (0..3).map(|i| format!("get_local_id({i})")).collect(),
+            uses_vload: true,
+            ..Default::default()
         }
     }
 }

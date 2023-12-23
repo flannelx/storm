@@ -12,6 +12,7 @@ pub enum Arg {
     Buffer(Buffers),
     Num(Vec<u8>), // in little-endian bytes, for devices
     Usize(usize),
+    Idx(isize),
 }
 
 impl Arg {
