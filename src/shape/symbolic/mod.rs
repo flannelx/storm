@@ -213,7 +213,7 @@ pub trait Node: core::fmt::Debug {
     fn render(&self, ops: Arc<dyn NodeOp>, ctx: Option<&str>, strip_paren: bool) -> String;
 
     fn render_default(&self) -> String {
-        self.render(CStyle::new(), None, false)
+        self.render(CStyle::new(), Some("DEBUG"), false)
     }
 
     fn vars(&self) -> Vec<ArcNode> {

@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{collections::HashMap, fmt::Display};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct CstyleLanguage {
     pub size_prefix: String,
     pub generic_var_prefix: Option<String>,
@@ -32,7 +32,34 @@ pub struct CstyleLanguage {
     pub launch_bounds: bool,
 }
 
-impl Op for CstyleLanguage { }
+impl Default for CstyleLanguage {
+    fn default() -> Self {
+        Self {
+            size_prefix: "int".into(),
+            generic_var_prefix: Default::default(),
+            kernel_prefix: Default::default(),
+            buffer_prefix: Default::default(),
+            buffer_suffix: Default::default(),
+            smem_prefix: Default::default(),
+            smem_align: Default::default(),
+            arg_int_prefix: "const int".into(),
+            barrier: Default::default(),
+            gid: Default::default(),
+            lid: Default::default(),
+            global_max: Default::default(),
+            local_max: Default::default(),
+            extra_args: Default::default(),
+            float4: Default::default(),
+            half_prekernel: Default::default(),
+            uses_vload: Default::default(),
+            external_local_bufs: Default::default(),
+            uses_ptr_arithmetic: Default::default(),
+            launch_bounds: Default::default(),
+        }
+    }
+}
+
+impl Op for CstyleLanguage {}
 
 pub struct FloatInt {
     pub float: f64,
@@ -78,16 +105,17 @@ impl CstyleLanguage {
                     "INFINITY".to_string()
                 }
             } else {
-                x.float.to_string() + "f"
+                format!("{:?}", x.float) + "f"
             }
         } else {
             x.int.to_string()
         };
-        if var_dtype.sz > 1 {
-            val
-        } else {
-            self.render_cast(&vec![val.as_str(); var_dtype.sz], var_dtype)
-        }
+        val
+        // if var_dtype.sz > 1 {
+        //     val
+        // } else {
+        //     self.render_cast(&vec![val.as_str(); var_dtype.sz], var_dtype)
+        // }
     }
 
     pub fn render_load(
@@ -140,7 +168,7 @@ impl CstyleLanguage {
     }
 
     pub fn render_for(&self, expr: &str, min: impl Display, max: impl Display) -> String {
-        format!("for (int {expr} = {min}; {expr} <= {max}; ++{expr}) {{")
+        format!("for (int {expr} = {min}; {expr} < {max}; {expr}++) {{")
     }
 
     pub fn render_conditional(&self, cond: &str, x: &str, y: &str) -> String {
@@ -151,24 +179,24 @@ impl CstyleLanguage {
         &self,
         function_name: &str,
         kernel: &[String],
-        bufs: &[Buffers],
+        bufs: &[(String, dtype::Dtype)],
         local_size: &[usize],
         _prekernel: &[String],
     ) -> String {
-        let tmp = if bufs.iter().any(|b| b.dtype().shape.is_some()) {
+        let tmp = if bufs.iter().any(|(_, dt)| dt.shape.is_some()) {
             "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
         } else {
             ""
         };
         let mut buftypes = vec![];
-        for (i, buffer) in bufs.iter().enumerate() {
-            let s = if buffer.dtype().c_name.starts_with("image") {
+        for (i, (name, dtype)) in bufs.iter().enumerate() {
+            let s = if dtype.type_name.starts_with("image") {
                 format!(
                     "{} image2d_t",
                     if 1 > 0 { "read_only" } else { "write_only" }
                 )
             } else {
-                if buffer.dtype() == dtype::_arg_int32 {
+                if dtype == &dtype::_arg_int32 {
                     self.arg_int_prefix.to_string()
                 } else {
                     (if i > 0 {
@@ -176,12 +204,12 @@ impl CstyleLanguage {
                     } else {
                         "".to_string()
                     }) + &self.buffer_prefix
-                        + buffer.dtype().c_name
+                        + dtype.c_name
                         + "*"
                         + &self.buffer_suffix
                 }
             };
-            buftypes.push((buffer, s));
+            buftypes.push((name, s));
         }
 
         let prod_local_size = local_size.iter().product::<usize>();
@@ -199,14 +227,14 @@ impl CstyleLanguage {
 
         let mut args = buftypes
             .iter()
-            .map(|(name, t)| format!("{t} {name:?}"))
+            .map(|(name, t)| format!("{t} {name}"))
             .collect::<Vec<String>>();
         args.extend(self.extra_args.clone());
         prg += &args.join(", ");
 
         prg += &format!("{}{}{}{}", ") {\n", tmp, kernel.join("\n"), "\n");
 
-        if self.half_prekernel.is_some() && bufs.iter().any(|buffer| buffer.dtype() == dtype::float16) {
+        if self.half_prekernel.is_some() && bufs.iter().any(|(_, dtype)| *dtype == dtype::float16) {
             prg = self.half_prekernel.as_ref().unwrap().clone() + "\n" + &prg;
         }
 
@@ -305,9 +333,9 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 kk("}", &mut kernel, depth);
             }
             UOps::WMMA => {
-                if &args[0] == "METAL" {
+                if &args[0].to_str() == "METAL" {
                     todo!();
-                } else if &args[0] == "HIP" {
+                } else if &args[0].to_str() == "HIP" {
                     todo!();
                 } else {
                     unimplemented!("WMMA not implemented for {args:?}")
@@ -395,7 +423,8 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                     .iter()
                     .map(|a| match a {
                         Arg::Str(v) => v.clone(),
-                        _ => panic!(),
+                        Arg::Usize(u) => u.to_string(),
+                        t => panic!("{t:?}"),
                     })
                     .collect::<Vec<String>>();
                 let xid = if args[1].starts_with("g") {
@@ -423,20 +452,24 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 // r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
                 // Huh?????????????????????????
                 assert!(args.len() >= 1);
-                let s = match &args[0] {
-                    Arg::Str(s) => s,
-                    _ => panic!(),
+                match &args[0] {
+                    Arg::Str(s) => {
+                        let mut fint = FloatInt { float: 0.0, int: 0 };
+                        if s.contains(".") {
+                            fint.float = s.parse::<f64>().unwrap();
+                        } else {
+                            fint.int = s.parse::<isize>().unwrap();
+                        }
+                        r.insert(
+                            u.clone(),
+                            lang.render_const(fint, dtype.as_ref().unwrap().clone()),
+                        );
+                    }
+                    Arg::Idx(i) => {
+                        r.insert(u.clone(), i.to_string());
+                    }
+                    t => panic!("{t:?}"),
                 };
-                let mut fint = FloatInt { float: 0.0, int: 0 };
-                if s.contains(".") {
-                    fint.float = s.parse::<f64>().unwrap();
-                } else {
-                    fint.int = s.parse::<isize>().unwrap();
-                }
-                r.insert(
-                    u.clone(),
-                    lang.render_const(fint, dtype.as_ref().unwrap().clone()),
-                );
             }
             UOps::LOAD => {
                 assert!(dtype.is_some());
@@ -530,7 +563,11 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 r.insert(u.clone(), args[0].to_str());
             }
             UOps::DEFINE_GLOBAL => {
-                bufs = args.iter().map(|args| args.to_buf()).collect::<Vec<_>>();
+                bufs.extend(
+                    args.iter()
+                        .map(|args| (args.to_str(), (*dtype).clone().unwrap()))
+                        .collect::<Vec<_>>(),
+                );
                 r.insert(u.clone(), args[0].to_str());
             }
             UOps::GEP => {

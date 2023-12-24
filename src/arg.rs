@@ -61,16 +61,9 @@ impl PartialEq for Arg {
             (Arg::Buffer(a), Arg::Buffer(b)) => a == b,
             (Arg::Num(a), Arg::Num(b)) => a == b,
             (Arg::Usize(a), Arg::Usize(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl PartialEq<str> for Arg {
-    fn eq(&self, other: &str) -> bool {
-        match self {
-            Arg::Str(s) => s == other,
-            _ => false,
+            (Arg::Idx(a), Arg::Idx(b)) => a == b,
+            (Arg::Shape(a), Arg::Shape(b)) => a == b,
+            _ => panic!(),
         }
     }
 }

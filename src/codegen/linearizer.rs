@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::arg::Arg;
 use crate::codegen::kernel::{Buffers, LocalBuffer, KERNEL_CNT};
-use crate::ops::{Binary, LazyOp, Reduce, Ternary, Unary};
+use crate::ops::{Binary, LazyOp, LazyOpSrc, Reduce, Ternary, Unary};
 use crate::shape::symbolic::{iter_idxs, num, var, ArcNode, NodeOp};
 use crate::shape::ShapeTracker;
 use crate::tensor::shape::Shape;
@@ -299,7 +299,7 @@ impl Linearizer {
         if let Some(reduceop) = &self.kernel.reduceop {
             let reduce_idxs = v![var(&format!("ridx{i}"), 0, self.kernel.full_shape()[i]-1), for i in self.kernel.first_reduce() as usize +self.kernel.group_for_reduce.len()..(self.kernel.shape_len()-self.kernel.upcasted) as usize];
             let fake_reduce_idxs = v![x*0, for x in reduce_idxs.iter()];
-            let acc = self.global_load(
+            let mut acc = self.global_load(
                 0,
                 vec![
                     global_idx.clone(),
@@ -317,6 +317,7 @@ impl Linearizer {
             // if self.kernel.tensor_core.is_some() {
             // }
 
+            println!("reduce idx len {}", reduce_idxs.len());
             let loop_ctx = self.render_loop(&reduce_idxs);
 
             //let mut locals_to_store = vec![];
@@ -337,12 +338,128 @@ impl Linearizer {
             //   locals_to_store.append((localbuf_idx, buf_idxs, ll))
 
             //if self.kernel.tensor_core //TODO:
+            //else if lcaols_to_store
+
+            let iter_ = v![(i, b.clone()), for (i, b) in  self.kernel.bufs.iter().enumerate().skip(1), if self.kernel.earlybufs.contains(b)];
+            loaded_buffers.extend(v![(b, self.global_load(i, vec![global_idx.clone(), local_idxs.clone(), reduce_idxs.clone(), upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_]);
+            let val = self.ast_parse(
+                self.kernel.ast.src[0].lo().clone(),
+                &mut acc,
+                None,
+                &loaded_buffers,
+                false,
+            );
 
             self.load_cache.clear();
             if self.kernel.group_for_reduce.len() > 0 {
                 let fake_global_idx = v![x*0, for x in global_idx.iter()];
+                let stores = self.global_store(
+                    -1,
+                    vec![
+                        fake_global_idx.clone(),
+                        local_idxs.clone(),
+                        fake_reduce_idxs.clone(),
+                        upcast_idxs.clone(),
+                    ]
+                    .concat(),
+                    acc,
+                );
+                //TODO:
             }
         }
+
+        //loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})  # noqa: E501
+        let iter_ = v![(i, b.clone()), for (i, b) in  self.kernel.bufs.iter().enumerate(), if !self.kernel.earlybufs.contains(b) && i != 0 && !matches!(b, Buffers::LocalBuffer(_))];
+        loaded_buffers.extend(v![(b, self.global_load(i, vec![global_idx.clone(), local_idxs.clone(), fake_reduce_idxs.clone(), upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_]);
+        let val = self.ast_parse(
+            self.kernel.ast.src[0].lo().clone(),
+            &mut acc,
+            None,
+            &loaded_buffers,
+            false,
+        );
+        self.global_store(
+            0,
+            vec![
+                global_idx.clone(),
+                local_idxs.clone(),
+                fake_reduce_idxs.clone(),
+                upcast_idxs.clone(),
+            ]
+            .concat(),
+            val,
+        );
+
+        let mut acc_scope: HashMap<UOp, Vec<UOp>> = HashMap::new();
+        for u in self.uops.iter() {
+            if u.uop == UOps::PHI {
+                acc_scope
+                    .entry(u.vin[0].clone())
+                    .or_default()
+                    .extend(u.vin[2..].iter().map(|n| n.clone()).collect::<Vec<UOp>>())
+            }
+        }
+
+        let mut loop_stack = vec![vec![]];
+        for u in self.uops.iter() {
+            println!("BEFORE LOOP STACK {:?}", u.uop);
+        }
+        for u in self.uops.iter() {
+            if loop_stack[loop_stack.len() - 1].is_empty() {
+                loop_stack.last_mut().unwrap().push(u.clone())
+            } else if u.uop == UOps::LOOP {
+                loop_stack.push(vec![u.clone()])
+            } else if !matches!(u.uop, UOps::CONST | UOps::ALU | UOps::CAST | UOps::LOAD) {
+                loop_stack.last_mut().unwrap().push(u.clone())
+            } else {
+                let parents = get_recursive_parents(u.clone(), &acc_scope, true);
+                for i in (0..loop_stack.len()).rev() {
+                    if v![0, for x in loop_stack[i].iter(), if parents.contains(x)].len() > 0
+                        || i == 0
+                    {
+                        loop_stack[i].push(u.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        self.uops = loop_stack.concat();
+        for u in loop_stack.concat().iter() {
+            println!("LOOP STACK {:?}", u.uop);
+        }
+
+        // # uops optimization
+        // changed_something = True
+        // while changed_something:
+        //   changed_something = False
+        //   for u in self.uops:
+        //     if u.uop == UOps.PHI and len(u.vin) == 3:
+        //       # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
+        //       # TODO: ADD becomes a MUL, MAX can just become nothing
+        //       if all(x.uop != UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg == BinaryOps.ADD:
+        //         if DEBUG >= 4: print(f"removing PHI node {u}")
+        //         del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
+        //         # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
+        //         loop_len = self.uop(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_before=self.uops.index(u))
+        //         if loop_len.dtype != u.dtype: loop_len = self.uop(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
+        //         replace_op(u, self.uop(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u)))
+        //         changed_something = True
+
+        // FIXME:
+        // let UOPS_W_SIDE_EFFECTS = HashSet::from([UOps::STORE, UOps::BARRIER, UOps::DEFINE_GLOBAL]);
+        // loop {
+        //     let mut has_child = HashSet::new();
+        //     for ru in self.uops.iter() {
+        //         for vu in ru.vin.iter() {
+        //             has_child.insert(vu);
+        //         }
+        //     }
+        //     let mut nu = v![x, for x in self.uops.iter(), if has_child.contains(x) || UOPS_W_SIDE_EFFECTS.contains(&x.uop)];
+        //     if nu.len() == self.uops.len() {
+        //         break;
+        //     }
+        //     self.uops = nu;
+        // }
 
         // println!("LOOP TOKENS: {:?}", loop_ctx);
         // println!(
@@ -373,6 +490,17 @@ impl Linearizer {
             true,
         )
     }
+    pub fn const_idx(&mut self, val: String, dtype: Dtype, insert_before: Option<isize>) -> UOp {
+        self.uop(
+            UOps::CONST,
+            Some(dtype),
+            vec![],
+            vec![Arg::Idx(val.parse::<isize>().unwrap())],
+            true,
+            insert_before,
+            true,
+        )
+    }
 
     pub fn const_default(&mut self, val: String) -> UOp {
         let dtype = int32;
@@ -391,16 +519,18 @@ impl Linearizer {
     pub fn render_loop(&mut self, xx: &[ArcNode]) -> Vec<UOp> {
         let mut new_loops = HashMap::new();
         for x in xx {
-            if !x.is_num() && x.expr().is_some() {
-                let min = self.const_default(x.min().unwrap().to_string());
-                let max = self.const_default(x.max().unwrap().to_string());
-                new_loops.insert(
-                    x.expr().unwrap().to_string(),
-                    self.uop_default(UOps::LOOP, Some(int32), vec![min, max], vec![]),
-                );
-            }
+            println!("{}", x.render_default());
+            //if !x.is_num() && x.expr().is_some() {
+            let min = self.const_default(x.min().unwrap().to_string());
+            let max = self.const_default((x.max().unwrap() + 1).to_string());
+            new_loops.insert(
+                x.expr().unwrap().to_string(),
+                self.uop(UOps::LOOP, Some(int32), vec![min, max], vec![], false, None, true),
+            );
+            //}
         }
         let ret = new_loops.values().map(|x| x.clone()).collect();
+        println!("ret {:?}", ret);
         self.loop_ops.extend(new_loops);
         ret
     }
@@ -425,6 +555,7 @@ impl Linearizer {
         mut insert_before: Option<isize>,
         mut simplify: bool,
     ) -> UOp {
+        print!("\ntrying to insert uop {:?}", uop);
         match uop {
             UOps::ALU => {
                 //assert!(dtype.as_ref().unwrap() == &_bool);
@@ -526,21 +657,25 @@ impl Linearizer {
             args: arg.clone(),
         };
         let key = &(uop, dtype.unwrap(), vin, arg);
+        let insert_before = if insert_before.is_some() {
+            insert_before.unwrap()
+        } else {
+            self.uops.len() as isize
+        };
         if let Some(expr) = self.saved_exprs.get(key) {
             if cachable
-                && (insert_before.is_none()
-                    || self
-                        .uops
-                        .iter()
-                        .position(|e| e == expr)
-                        .is_some_and(|i| i as isize <= insert_before.unwrap()))
+                && self
+                    .uops
+                    .iter()
+                    .position(|e| e == expr)
+                    .is_some_and(|i| i as isize <= insert_before)
             {
+                println!(" return cached");
                 return expr.to_owned();
             }
         };
-        if let Some(i) = insert_before {
-            self.uops.insert(i as usize, ret.clone());
-        };
+        self.uops.insert(insert_before as usize, ret.clone());
+        println!(" inserted");
         if cachable {
             self.saved_exprs.insert(key.clone(), ret.clone());
         }
@@ -658,24 +793,25 @@ impl Linearizer {
                         );
                         self.load_cache.insert(key.clone(), tmp);
                     }
+                } else {
+                    assert!(self.buf_ops[i].is_some(), "buffer {i} wasn't UOped");
+                    let buf_uop = self.buf_ops[i].clone().unwrap();
+                    // WARN: This seem to be always empty
+                    // valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
+                    // panic!("{:?}", idx.render_default());
+                    let rendered_idx = self.render(idx);
+                    let mut vin = vec![buf_uop, rendered_idx];
+                    if let Some(bb) = barrier.take() {
+                        vin.push(bb)
+                    }
+                    let tmp = self.uop_default(
+                        UOps::LOAD,
+                        Some(localtype.clone()),
+                        vin,
+                        vec![Arg::OpType(OpType::Ternary(Ternary::Where))],
+                    );
+                    self.load_cache.insert(key.clone(), tmp);
                 }
-                assert!(self.buf_ops[i].is_some(), "buffer {i} wasn't UOped");
-                let buf_uop = self.buf_ops[i].clone().unwrap();
-                // WARN: This seem to be always empty
-                // valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
-                // panic!("{:?}", idx.render_default());
-                let rendered_idx = self.render(idx);
-                let mut vin = vec![buf_uop, rendered_idx];
-                if let Some(bb) = barrier.take() {
-                    vin.push(bb)
-                }
-                let tmp = self.uop_default(
-                    UOps::LOAD,
-                    Some(localtype.clone()),
-                    vin,
-                    vec![Arg::OpType(OpType::Ternary(Ternary::Where))],
-                );
-                self.load_cache.insert(key.clone(), tmp);
             }
             if let Some(d) = dim {
                 ret.push(self.uop_default(
@@ -691,18 +827,163 @@ impl Linearizer {
         ret
     }
 
-    fn global_store(&self, i: usize, idxs: Vec<ArcNode>, store: Option<UOp>) -> Vec<UOp> {
+    fn global_store(&mut self, i: isize, idxs: Vec<ArcNode>, store: Vec<UOp>) -> Vec<UOp> {
+        let i = if i < 0 {
+            (self.kernel.bufs.len() as isize - i) as usize
+        } else {
+            i as usize
+        };
         let buf = &self.kernel.bufs[i];
-        let buf_uop = &self.buf_ops[i];
+        let buf_uop = self.buf_ops[i].clone();
         assert!(buf_uop.is_some(), "buffer {i} wasn't UOped");
         let expanded_node = v![idx.nodes(), for idx in idxs.iter()];
-        todo!()
+        let _idxs = v![x.iter().rev().map(|n| n.clone()).collect::<Vec<ArcNode>>(), for x in itertools::iproduct!(expanded_node.iter())];
+        let store_offset: HashMap<Vec<ArcNode>, UOp> =
+            HashMap::from_iter(v![(i, s), for (i, s) in izip!(_idxs, store)]);
+        let upcast_dim = self.get_upcast_dim(i);
+        if upcast_dim.len() == 1 && matches!(expanded_node[upcast_dim[0] as usize].len(), 2 | 4) {
+            //TODO: float4
+        }
+        let mut stores = vec![];
+        for (idx, var) in store_offset.iter() {
+            let (idx, valid) = self.kernel.sts[i].expr_idxs(Some(idx.to_vec()));
+            let render_idx = self.render(idx);
+            if valid.min().unwrap() == 1 {
+                stores.push(self.uop_default(
+                    UOps::STORE,
+                    None,
+                    vec![buf_uop.clone().unwrap(), render_idx, var.clone()],
+                    vec![],
+                ));
+            } else {
+                let valid_rendered = self.render(valid);
+                stores.push(self.uop_default(
+                    UOps::STORE,
+                    None,
+                    vec![
+                        buf_uop.clone().unwrap(),
+                        render_idx,
+                        var.clone(),
+                        valid_rendered,
+                    ],
+                    vec![],
+                ));
+            }
+        }
+        stores
     }
 
     fn get_upcast_dim(&self, i: usize) -> Vec<isize> {
         let should_upcast = self.kernel.opts.support_float4
             && matches!(self.kernel.bufs[i].dtype(), float32 | float16);
         v![x, for x in self.kernel.sts[i].unit_stride_axes(false), if should_upcast && x >= self.kernel.shape_len()-self.kernel.upcasted && Shape::from(self.kernel.sts[i].shape())[x] > 1]
+    }
+
+    fn ast_parse(
+        &mut self,
+        mut x: LazyOp,
+        acc: &mut [UOp],
+        offs: Option<&[isize]>,
+        loaded_buffers: &HashMap<Buffers, Vec<UOp>>,
+        do_reduce: bool,
+    ) -> Vec<UOp> {
+        match &x.optype {
+            OpType::Buffer(_) => return loaded_buffers[&x.args[0].to_buf()].clone(),
+            OpType::Reduce(b) => {
+                if !do_reduce {
+                    return acc.to_vec();
+                }
+                match b {
+                    Reduce::Sum => {
+                        // TODO: UnaryOps.Cast
+                        // if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:  # noqa: E501
+                        //   x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
+                        if matches!(x.src[0], LazyOpSrc::LazyOp(_))
+                            && x.src[0].optype() == Binary::Mul
+                        {
+                            x = LazyOp::new(
+                                OpType::Ternary(Ternary::Mulacc),
+                                x.src[0].src(),
+                                Some(x.args),
+                            );
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+        let values = v![self.ast_parse(x.clone(), acc, offs, loaded_buffers, do_reduce), for v in x.src.iter()];
+        let ops = HashMap::from([
+            (OpType::Reduce(Reduce::Sum), OpType::Binary(Binary::Add)),
+            (OpType::Reduce(Reduce::Max), OpType::Binary(Binary::Max)),
+            (
+                OpType::Ternary(Ternary::Mulacc),
+                OpType::Ternary(Ternary::Mulacc),
+            ),
+        ]);
+        let mut ret = vec![];
+        let values_transpose = (0..values.len())
+            .map(|i| {
+                values
+                    .iter()
+                    .map(|row| row[i].clone())
+                    .collect::<Vec<UOp>>()
+            })
+            .collect::<Vec<Vec<UOp>>>();
+        if ops.contains_key(&x.optype) {
+            let input_acc = acc.to_vec();
+            for (val, &off) in izip!(values_transpose.iter(), offs.as_ref().unwrap().iter()) {
+                let off = off as usize;
+                acc[off] = self.uop_default(
+                    UOps::ALU,
+                    None,
+                    vec![val.clone(), vec![acc[off].clone()]].concat(),
+                    vec![],
+                );
+                ret.push(acc[off].clone());
+            }
+            for off in 0..acc.len() {
+                if input_acc[off] != acc[off] {
+                    acc[off] = self.uop_default(
+                        UOps::PHI,
+                        input_acc[off].dtype.clone(),
+                        vec![input_acc[off].clone(), acc[off].clone()],
+                        vec![],
+                    );
+                }
+            }
+        } else {
+            ret = v![self.uop(UOps::ALU, if x.optype == Binary::Cmplt { Some(_bool)} else {Some(float32)}, val.clone(),vec![Arg::OpType(x.optype.clone())], true, None, true), for val in values_transpose.iter()];
+        }
+        ret
+    }
+
+    fn get_recursive_children(&self, x: UOp) -> HashSet<UOp> {
+        let mut deps = HashSet::from([x.clone()]);
+        let mut ssize = 0;
+        while ssize != deps.len() {
+            for u in self.uops.iter() {
+                if deps
+                    .intersection(&HashSet::from_iter(
+                        v![x, for x in u.vin.iter(), if x.uop != UOps::PHI],
+                    ))
+                    .count()
+                    > 0
+                {
+                    deps.insert(u.clone());
+                }
+            }
+        }
+        deps
+    }
+
+    fn replace_op(&mut self, old: &UOp, new: &UOp) {
+        for u in self.uops.iter_mut() {
+            u.vin = v![if x == old { new.clone() } else {x.clone() }, for x in u.vin.iter()];
+        }
+        self.uops
+            .remove(self.uops.iter().position(|u| u == old).unwrap());
     }
 }
 
@@ -862,7 +1143,7 @@ impl Linearizer {
                 self.uop_alu_idx(a, node.b().unwrap(), OpType::Binary(Binary::Cmplt), None)
             }
             "Variable" => self.loop_ops[node.expr().unwrap()].clone(),
-            "NumNode" => self._const(node.num_val().unwrap().to_string(), float32, None),
+            "NumNode" => self.const_idx(node.num_val().unwrap().to_string(), float32, None),
             "SumNode" => {
                 let nodes = node.nodes();
                 let mut uop = self.render(nodes[0].clone());
@@ -883,4 +1164,26 @@ impl Linearizer {
             t => panic!("you forgot this {t}"),
         };
     }
+}
+
+fn get_recursive_parents(
+    x: UOp,
+    acc_scope: &HashMap<UOp, Vec<UOp>>,
+    with_phi: bool,
+) -> HashSet<UOp> {
+    let mut ret = HashSet::from_iter(x.vin.clone());
+    for p in x.vin.iter() {
+        ret = ret
+            .union(&get_recursive_parents(p.clone(), acc_scope, with_phi))
+            .into_iter()
+            .map(|s| s.clone())
+            .collect::<HashSet<UOp>>();
+    }
+    if with_phi && acc_scope.get(&x).is_some() {
+        ret = ret
+            .union(&HashSet::from_iter(acc_scope[&x].clone()))
+            .map(|s| s.clone())
+            .collect::<HashSet<UOp>>();
+    }
+    ret
 }

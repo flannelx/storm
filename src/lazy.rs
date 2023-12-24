@@ -365,9 +365,7 @@ impl LazyBuffer {
             LazyOp::new(
                 optype,
                 srcs.into_iter().map(|s| s.into()).collect(),
-                Some(
-                    vec![Arg::Shape(unbound_new_shape.to_vec())]
-                ),
+                Some(vec![Arg::Shape(unbound_new_shape.to_vec())]),
             ),
             self.dtype.clone(),
             None,
@@ -789,9 +787,10 @@ fn _push_movement_ops(srcs: &[&LazyBuffer]) -> Vec<LazyBuffer> {
             && bx.children.len() <= 1
             && mops.iter().all(|m| m.0 != Movement::Pad)
         {
-            todo!()
+            new_srcs.push((*x).clone());
+        } else {
+            new_srcs.push((*x).clone());
         }
-        new_srcs.push((*x).clone());
     }
     new_srcs
 }
@@ -962,12 +961,11 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     while !schedule.is_empty() {
         let si = schedule.pop_front().unwrap();
-        assert!(
-            v![x.is_realized(), for x in si.inputs.iter()]
-                .iter()
-                .all(|b| *b),
-            "Can't run schedule, some inputs aren't realized"
-        );
+        for x in si.inputs.iter() {
+            if !x.is_realized() {
+                panic!("Can't run schedule, {x:?} isnt't realized")
+            }
+        }
         match &si.ast.optype {
             OpType::Load(l) => {
                 match l {
@@ -983,7 +981,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
         }
 
         let (name, prg) = DEVICE.render(si.ast.clone());
-        println!("{}\n{}", name, prg)
+
 
         //let prg = DEVICE.build(name, program)
     }
@@ -1086,11 +1084,15 @@ pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
             }
             OpType::Reduce(_) => {
                 //println!("REDUCE REDUCE REDUCE\n{:?}", o);
-                return get_lazyop_info(&o.lo().src[0])
-                    .reduce(&o.lo().args[0].shape());
+                return get_lazyop_info(&o.lo().src[0]).reduce(&o.lo().args[0].shape());
             }
             OpType::Ternary(t) => match t {
-                ops::Ternary::Where => return get_lazyop_info(&o).ternary_where(get_lazyop_info(&o.lo().src[0]), get_lazyop_info(&o.lo().src[0])),
+                ops::Ternary::Where => {
+                    return get_lazyop_info(&o).ternary_where(
+                        get_lazyop_info(&o.lo().src[0]),
+                        get_lazyop_info(&o.lo().src[0]),
+                    )
+                }
                 t => println!("{t:?}"),
             },
             OpType::Buffer(b) => match b {

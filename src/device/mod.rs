@@ -34,6 +34,10 @@ pub trait Device: Send + Sync + core::fmt::Debug {
         let mut lin = Linearizer::new(ast, Some(self.linearizer_opts()));
         lin.linearize();
         let prg = uops_to_cstyle(self.renderer(), &lin.name, &lin.uops);
+        println!("{}\n{}", lin.name, prg);
+        for u in lin.uops {
+            println!("{:?}", u.uop);
+        };
         (lin.name, prg)
     }
 }
