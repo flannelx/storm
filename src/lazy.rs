@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
 use half::f16;
+use itertools::Itertools;
 use rand::Rng;
 
 use crate::codegen::kernel::Buffers;
@@ -120,7 +121,8 @@ impl core::fmt::Debug for LazyBuffer {
         write!(
             f,
             "<LB dtype={:?} op={:?} st={:?}>",
-            self.dtype.type_name, self.lazyop.optype, self.st.views)
+            self.dtype.type_name, self.lazyop.optype, self.st.views
+        )
     }
 }
 
@@ -315,6 +317,7 @@ impl LazyBuffer {
         }
 
         let (mut op, base_bufs) = _replace_bufferops(op);
+        //println!("{} {:?}", base_bufs.len(), base_bufs);
         if !matches!(op.optype, OpType::Load(_)) {
             let info = get_lazyop_info(&op.clone().into());
             op = LazyOp::new(
@@ -865,7 +868,7 @@ fn _realize_empty(buffer: &LazyBuffer) {
         let x = Arc::get_mut_unchecked(&mut buffer.device_buffer);
         x.replace(DEVICE.alloc(
             buffer.shape.iter().product::<isize>() as usize,
-            buffer.dtype,
+            buffer.dtype.clone(),
         ));
     }
 }
@@ -875,7 +878,7 @@ fn _realize_rand(buffer: &LazyBuffer) {
     let numel = buffer.shape.iter().product::<isize>() as usize;
     let mut on_cpu = gen_rand_num_bytes(numel, &buffer.dtype);
     unsafe {
-        let mut b = DEVICE.alloc(numel, buffer.dtype);
+        let mut b = DEVICE.alloc(numel, buffer.dtype.clone());
         Arc::get_mut_unchecked(&mut b).from_cpu(on_cpu);
         Arc::get_mut_unchecked(&mut buffer.device_buffer).replace(b);
     }
@@ -921,7 +924,7 @@ fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
 
 pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
     let mut replacements: HashMap<LazyBuffer, LazyOp> = HashMap::new();
-    let base_bufs = v![x.base(), for x in op.buffers.iter(), if !x.is_unrealized_const()];
+    let mut base_bufs:Vec<LazyBuffer> = v![x.base(), for x in op.buffers.iter(), if !x.is_unrealized_const()].into_iter().unique().collect();
     for x in op.buffers.iter() {
         let st = x.st.simplify();
         if base_bufs.contains(&x.base()) {
@@ -982,7 +985,7 @@ pub struct KernelCache {
     prg: String,
     global_size: Vec<usize>,
     local_size: Vec<usize>,
-    buffers: Vec<Arc<dyn Buffer>>
+    buffers: Vec<Arc<dyn Buffer>>,
 }
 
 unsafe impl Send for KernelCache {}
@@ -993,8 +996,10 @@ lazy_static::lazy_static! {
 }
 
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
+    //TODO: Need to "copyin/out" here to avoid alloc data to new buf instead of bufs that are
+    //already allocated.
     while !schedule.is_empty() {
-        let si = schedule.pop_front().unwrap();
+        let mut si = schedule.pop_front().unwrap();
         for x in si.inputs.iter() {
             if !x.is_realized() {
                 panic!("Can't run schedule, {x:?} isnt't realized")
@@ -1012,11 +1017,6 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             }
             _ => (),
         }
-        if si.out.device_buffer.is_none() {
-            _realize_empty(&si.out);
-        }
-        let mut bufs = vec![(*si.out.device_buffer).as_ref().unwrap().clone()];
-        bufs.extend(v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()]);
         let cached = KERNEL_CACHED
             .lock()
             .unwrap()
@@ -1026,8 +1026,16 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             println!("\ncached hit");
             println!("{}", kernel.prg);
             let prg = DEVICE.build(&kernel.name, &kernel.prg);
+            unsafe {
+                Arc::get_mut_unchecked(&mut si.out.device_buffer)
+                    .replace(kernel.buffers[0].clone());
+            }
             prg.run(
-                &kernel.buffers,
+                &vec![
+                    vec![kernel.buffers[0].clone()],
+                    v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()],
+                ]
+                .concat(),
                 kernel.global_size.as_ref(),
                 Some(kernel.local_size.as_ref()),
                 &[],
@@ -1035,8 +1043,16 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             );
         } else {
             println!("\nzero hit");
+            if si.out.device_buffer.is_none() {
+                _realize_empty(&si.out);
+            }
+            let mut bufs = vec![(*si.out.device_buffer).as_ref().unwrap().clone()];
+            bufs.extend(
+                v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()],
+            );
             let mut lin = DEVICE.get_lin(si.ast.clone());
             lin.linearize();
+            println!("{} {:?}\n{} {:?}", lin.kernel.bufs.len(), lin.kernel.bufs, bufs.len(), bufs);
             let global_size = if let Some(mut gs) = lin.global_size.clone() {
                 gs.extend(vec![1; 3 - gs.len()]);
                 gs
@@ -1058,7 +1074,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                     global_size: global_size.clone(),
                     local_size: local_size.clone(),
                     buffers: v![b.clone(), for b in bufs.iter()],
-                }
+                },
             );
             println!("{prg}");
             let prg = DEVICE.build(&name, &prg);

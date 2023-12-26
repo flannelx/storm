@@ -183,6 +183,12 @@ impl Device for CLDevice {
     fn renderer(&self) -> Arc<dyn Renderer> {
         self.renderer.clone()
     }
+
+    fn dealloc(&self, src: &dyn Buffer) {
+        unsafe {
+            opencl3::memory::release_mem_object(src.ptr());
+        }
+    }
 }
 
 #[derive(Debug)]

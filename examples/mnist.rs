@@ -8,7 +8,8 @@ pub fn main() {
     let mut model = ConvNet::default();
     if training {
         let optim = adam(&[&mut model.c1, &mut model.c2, &mut model.l1], 0.001);
-        train(&model, optim, 500, 2000).unwrap();
+        let batch_size = 128;
+        train(&model, optim, batch_size, 60000/batch_size).unwrap();
     } else {
         eval(&model).unwrap();
     }
@@ -26,9 +27,9 @@ impl Default for ConvNet {
         let cin = 8;
         let cout = 16;
         Self {
-            c1: Tensor::scaled_uniform([cin, 1, conv, conv]),
-            c2: Tensor::scaled_uniform([cout, cin, conv, conv]),
-            l1: Tensor::scaled_uniform([cout * 5 * 5, 10]),
+            c1: Tensor::scaled_uniform([16, 1, conv, conv]),
+            c2: Tensor::scaled_uniform([64, 16, conv, conv]),
+            l1: Tensor::scaled_uniform([1600, 128]),
         }
     }
 }
@@ -134,12 +135,11 @@ fn train<Optim: Optimizer>(
     pb.refresh()?;
     for i in 0..epoch {
         let x = Tensor::from(&*img_batched[i]).reshape([batch_size, 1, 28, 28]);
-        //let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
+        let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
         let out = model.forward(&x).realize();
-        //let mut loss = out.sparse_categorical_crossentropy(&y);
-        out.realize();
-        //println!("out {:?}",out.realize());
-        // optim.zero_grad();
+        let mut loss = out.sparse_categorical_crossentropy(&y);
+        loss.realize();
+        //println!("out {:?}",out.to_vec());
         // loss.backward();
         // optim.step();
         // let pred = out.detach().argmax(-1);
