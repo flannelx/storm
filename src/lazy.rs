@@ -284,11 +284,8 @@ impl LazyBuffer {
         }
 
         let (mut op, base_bufs) = _replace_bufferops(op);
-        //println!("replace_bufferops {:?} {:?}", op, base_bufs);
-        //println!("{:?}", ret.len());
         if !matches!(op.optype, OpType::Load(_)) {
             let info = get_lazyop_info(&op.clone().into());
-            //println!("info.shape{:?} self.shape{:?}", info.shape, self.shape);
             op = LazyOp::new(
                 OpType::Buffer(ops::Buffer::Store),
                 vec![op.clone().into()],
@@ -296,10 +293,7 @@ impl LazyBuffer {
                     MemBuffer {
                         idx: 0,
                         dtype: self.dtype.clone(),
-                        //WARN: not sure if this is correct 100% of the time for getting shape.
-                        //st: ShapeTracker::from_shape(&op.get_lazyops().last().unwrap().args[0].to_buf().st().shape()),
                         st: ShapeTracker::from_shape(&info.shape),
-                        src: Arc::new(self.base()),
                     }
                     .into(),
                 )]),
@@ -325,30 +319,20 @@ impl LazyBuffer {
             .unwrap()
             .dtype
             .clone();
-        // # if we are separated from other binary ops by movement ops, we push those movement ops above those binaryops
-        //     if SHUFFLE_MOVEMENT_OPS: srcs = _push_movement_ops(srcs)
-        //
-        //     # get outputs now
-        //     out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max([x.dtype for x in srcs]) if op != UnaryOps.CAST else cast(Tuple[Dtype, bool], arg)[0]
-        //
-        //     # push all contiguous to the end of BinaryOps. kernels 198 -> 196
-        //     if PUSH_CONTIGUOUS and any(not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
-        //       new_srcs: List[LazyBuffer] = []
-        //       for x in srcs:
-        //         if not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
-        //           x.op.src[0].children.discard(x)
-        //           new_srcs.append(cast(LazyBuffer, x.op.src[0]))
-        //         else:
-        //           new_srcs.append(x)
-        //       return new_srcs[0].e(op, *new_srcs[1:], arg=arg).contiguous()
-        //
-        //     if MERGE_ELEMENTWISE_OPS:
-        //       # remove the buffers from any (childless) BinaryOps that feed into this
-        //       srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])  # type: ignore
+        let srcs: Vec<LazyOpSrc> = srcs
+            .iter()
+            .map(|x| {
+                if matches!(x.lazyop.optype, OpType::Binary(_)) {
+                    (*x.lazyop).clone().into()
+                } else {
+                    x.clone().into()
+                }
+            })
+            .collect();
         create_lazybuffer(
             &out_device,
             ShapeTracker::new(&out_shape, None),
-            LazyOp::new(optype, srcs.into_iter().map(|s| s.into()).collect(), None),
+            LazyOp::new(optype, srcs, None),
             out_dtype,
             None,
         )
@@ -647,8 +631,8 @@ pub fn create_lazybuffer(
         optype,
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
-        let mut ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
-        ret.device_buffer = ret.base().device_buffer.clone();
+        let ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
+        println!("{:?}", ret);
         return ret;
     }
     // # wop is the deduping key. i feel this used to compare more deeply
@@ -658,8 +642,8 @@ pub fn create_lazybuffer(
     //   return lazycache[wop]
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
-    let mut ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
-    ret.device_buffer = ret.base().device_buffer.clone();
+    let ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
+    println!("{:?}", ret);
     ret
 }
 
@@ -918,7 +902,6 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
                             idx: base_bufs.iter().position(|b| b == &x.base()).unwrap() + 1,
                             dtype: x.dtype.clone(),
                             st,
-                            src: Arc::new(x.base()),
                         }
                         .into(),
                     )]),
@@ -935,7 +918,6 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
                             val: x.base().lazyop.args[0].to_str(),
                             dtype: x.dtype.clone(),
                             st,
-                            src: Arc::new(x.base()),
                         }
                         .into(),
                     )]),
@@ -983,25 +965,12 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             _ => (),
         }
         let mut lin = DEVICE.get_lin(si.ast.clone());
-        let mut mem_bufs = vec![];
-        for b in lin.kernel.bufs.iter() {
-            if let Buffers::MemBuffer(b) = b {
-                mem_bufs.push(b.clone())
-            }
+        if si.out.device_buffer.is_none() {
+            _realize_empty(&si.out);
         }
-        for mem_buf in mem_bufs.iter() {
-            if mem_buf.src.device_buffer.is_none() {
-                //println!("alloc mem {mem_buf:?}");
-                _realize_empty(&mem_buf.src);
-            }
-        }
+        let mut bufs = vec![(*si.out.device_buffer).as_ref().unwrap().clone()];
+        bufs.extend(v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()]);
         lin.linearize();
-        let bufs = lin
-            .kernel
-            .bufs
-            .iter()
-            .map(|b| b.buf_ptr())
-            .collect::<Vec<Arc<Option<Arc<dyn Buffer>>>>>();
         let global_size = if let Some(mut gs) = lin.global_size.clone() {
             gs.extend(vec![1; 3 - gs.len()]);
             gs
@@ -1026,16 +995,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
         // }
         //         "#;
         let prg = DEVICE.build(&name, &prg);
-        prg.run(
-            &mem_bufs
-                .iter()
-                .map(|m| (*m.src.device_buffer).as_ref().unwrap().clone())
-                .collect::<Vec<Arc<dyn Buffer>>>(),
-            &global_size,
-            Some(&local_size),
-            &[],
-            &[],
-        );
+        prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
     }
 }
 

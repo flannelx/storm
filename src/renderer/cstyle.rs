@@ -137,16 +137,16 @@ pub trait Renderer: 'static + Send + Sync + Op {
             assert!(output_dtype == dtype::_float4, "images nust be float4");
             return format!("read_imagef({buf_name}, smp, {idx})");
         }
-        if self.lang_opts().uses_vload && buf_dtype == dtype::float16 {
-            return format!(
-                "vload_half({})",
-                if output_dtype.sz == 1 {
-                    "".to_string()
-                } else {
-                    output_dtype.sz.to_string()
-                } + &format!("(0, {buf_name}+{idx})").to_string()
-            );
-        }
+        // if self.lang_opts().uses_vload && buf_dtype == dtype::float16 {
+        //     return format!(
+        //         "vload_half({})",
+        //         if output_dtype.sz == 1 {
+        //             "".to_string()
+        //         } else {
+        //             output_dtype.sz.to_string()
+        //         } + &format!("(0, {buf_name}+{idx})").to_string()
+        //     );
+        // }
         if output_dtype.sz > 1 {
             return format!(
                 "*(({}{}{}*)({buf_name}+{idx}))",
@@ -263,16 +263,16 @@ pub trait Renderer: 'static + Send + Sync + Op {
             assert!(var_dtype == dtype::_float4);
             return format!("write_imagef({buf_name}, {idx}, {var_name});");
         }
-        if self.lang_opts().uses_vload && buf_dtype == dtype::float16 {
-            return format!(
-                "vstore_half{}({var_name}, 0, {buf_name}+{idx});",
-                if var_dtype.sz == 1 {
-                    "".to_string()
-                } else {
-                    var_dtype.sz.to_string()
-                }
-            );
-        }
+        // if self.lang_opts().uses_vload && buf_dtype == dtype::float16 {
+        //     return format!(
+        //         "vstore_half{}({var_name}, 0, {buf_name}+{idx});",
+        //         if var_dtype.sz == 1 {
+        //             "".to_string()
+        //         } else {
+        //             var_dtype.sz.to_string()
+        //         }
+        //     );
+        // }
         if var_dtype.sz > 1 {
             return format!(
                 "*(({}{}{}*)({buf_name}+{idx})) = ({}{}){var_name};",

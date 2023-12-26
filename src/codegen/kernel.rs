@@ -60,7 +60,6 @@ pub struct MemBuffer {
     pub idx: usize,
     pub dtype: dtype::Dtype,
     pub st: ShapeTracker,
-    pub src: Arc<LazyBuffer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -68,7 +67,6 @@ pub struct ConstBuffer {
     pub val: String,
     pub dtype: dtype::Dtype,
     pub st: ShapeTracker,
-    pub src: Arc<LazyBuffer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -116,15 +114,6 @@ impl Buffers {
         match self {
             Buffers::MemBuffer(b) => b.idx,
             t => panic!("{t:?} does not have a idx"),
-        }
-    }
-
-    pub fn buf_ptr(&self) -> Arc<Option<Arc<dyn Buffer>>> {
-        match self {
-            Buffers::MemBuffer(b) => b.src.device_buffer.clone(),
-            Buffers::ConstBuffer(b) => b.src.device_buffer.clone(),
-            Buffers::LazyBuffer(b) => b.device_buffer.clone(),
-            Buffers::LocalBuffer(_) => todo!(),
         }
     }
 }
