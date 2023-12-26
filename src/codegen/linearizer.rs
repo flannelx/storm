@@ -854,7 +854,7 @@ impl Linearizer {
                     UOps::GEP,
                     Some(localtype.clone()),
                     vec![self.load_cache[&key].clone()],
-                    vec![Arg::Idx(rep_idx[d as usize] as isize)],
+                    vec![Arg::Str(rep_idx[d as usize].to_string())],
                 ))
             } else {
                 ret.push(self.load_cache[&key].clone())
@@ -1112,7 +1112,7 @@ pub fn get_reduce_acc(op: OpType, dtype: Dtype) -> ConstNum {
     };
     if op == Reduce::Max {
         return if dtype.is_float() {
-            ConstNum::Float(-f32::MAX)
+            ConstNum::Float(-f32::INFINITY)
         } else {
             ConstNum::Int(-i128::MAX)
         };

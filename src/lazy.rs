@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use half::f16;
 use rand::Rng;
@@ -104,13 +105,22 @@ impl std::hash::Hash for LazyBuffer {
     }
 }
 
+// impl core::fmt::Debug for LazyBuffer {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(
+//             f,
+//             "<LB id={:?} dtype={:?} op={:?} st={:?} device_buffer={:?}>",
+//             self.id.0, self.dtype.type_name, self.lazyop.optype, self.st.views, self.device_buffer
+//         )
+//     }
+// }
+//
 impl core::fmt::Debug for LazyBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<LB id={:?} dtype={:?} op={:?} st={:?} device_buffer={:?}>",
-            self.id.0, self.dtype.type_name, self.lazyop.optype, self.st.views, self.device_buffer
-        )
+            "<LB dtype={:?} op={:?} st={:?}>",
+            self.dtype.type_name, self.lazyop.optype, self.st.views)
     }
 }
 
@@ -121,7 +131,6 @@ impl LazyBuffer {
         optype: OpType,
         op: LazyOp,
         dtype: Dtype,
-        src: Option<Arc<dyn Buffer>>,
         base: Option<Arc<LazyBuffer>>,
     ) -> Self {
         let mut ret = Self {
@@ -129,12 +138,16 @@ impl LazyBuffer {
             lazyop: op.into(),
             shape: st.shape(),
             st: st.into(),
-            device_buffer: Arc::new(src),
-            _base: base,
             children: HashSet::new(),
             views: HashSet::new(),
             id: lb_id(),
             dtype,
+            device_buffer: if base.is_some() {
+                base.as_ref().unwrap().device_buffer.clone()
+            } else {
+                Arc::new(None)
+            },
+            _base: base,
         };
         let rc = ret.clone();
         for x in ret.lazyop.buffers.iter_mut() {
@@ -191,39 +204,57 @@ impl LazyBuffer {
         )
     }
 
-    pub fn _const(&self, val: impl num_traits::ToBytes + num_traits::ToPrimitive) -> Self {
+    pub fn _const(&self, val: impl Display) -> Self {
         Self::loadop(
             OpType::Load(Load::Const),
             &vec![],
             self.dtype.clone(),
             &self.device,
-            Some(vec![Arg::Num(val.to_le_bytes().as_ref().to_vec())]),
+            Some(vec![Arg::Str(val.to_string())]),
             None,
         )
         .reshape(&vec![1; self.shape.len()])
         .expand(&self.shape)
     }
 
-    pub fn from_cpu<T>(x: Vec<T>) -> Self {
-        todo!()
+    pub fn from_cpu<T: num_traits::ToBytes>(x: Vec<T>) -> Self {
+        let bytes = x
+            .iter()
+            .map(|x| x.to_le_bytes().as_ref().to_vec())
+            .collect::<Vec<Vec<u8>>>()
+            .concat();
+        let mut buf = DEVICE.alloc(x.len(), dtype::type_to_dtype::<T>());
+        DEVICE.copyin(bytes, &*buf);
+        Self {
+            lazyop: LazyOp::new(Load::Empty.into(), vec![], None).into(),
+            st: ShapeTracker::from_shape(&[x.len() as isize]).into(),
+            device_buffer: Arc::new(Some(buf)),
+            _base: None,
+            shape: vec![x.len() as isize],
+            children: HashSet::new(),
+            views: HashSet::new(),
+            id: lb_id(),
+            dtype: dtype::type_to_dtype::<T>(),
+            device: "GPU".into(),
+        }
     }
 
-    pub fn copy_to_device(&self, device: &str) -> Self {
-        if !self.is_realized()
-            && matches!(self.lazyop.optype, OpType::Load(_))
-            && self.lazyop.optype != Load::Const
-        {
-            return self.clone();
-        }
-        Self::loadop(
-            OpType::Load(Load::From),
-            &self.shape,
-            self.dtype.clone(),
-            &self.device,
-            None,
-            Some(self.contiguous()),
-        )
-    }
+    // pub fn copy_to_device(&self, device: &str) -> Self {
+    //     if !self.is_realized()
+    //         && matches!(self.lazyop.optype, OpType::Load(_))
+    //         && self.lazyop.optype != Load::Const
+    //     {
+    //         return self.clone();
+    //     }
+    //     Self::loadop(
+    //         OpType::Load(Load::From),
+    //         &self.shape,
+    //         self.dtype.clone(),
+    //         &self.device,
+    //         None,
+    //         Some(self.contiguous()),
+    //     )
+    // }
 
     pub fn contiguous(&self) -> Self {
         if !self.is_realized()
@@ -418,22 +449,27 @@ impl LazyBuffer {
                 && matches!(self.lazyop.optype, OpType::Unary(_))))
             && self.children.is_empty()
         {
-            return match optype {
-                OpType::Movement(m) => match m {
-                    Movement::Reshape => self.reshape(arg),
-                    Movement::Expand => self.expand(arg),
-                    _ => unreachable!(),
-                },
-                _ => unreachable!(),
-            };
+            return replace_with_movement_ops(
+                &(*self.lazyop.0).clone().into(),
+                &[(self.lazyop.optype.clone(), arg.to_vec())],
+            );
+            // return match optype {
+            //     OpType::Movement(m) => match m {
+            //         Movement::Reshape => self.reshape(arg),
+            //         Movement::Expand => self.expand(arg),
+            //         _ => unreachable!(),
+            //     },
+            //     _ => unreachable!(),
+            // };
         }
+        assert!(!st.shape().is_empty());
         if !self.is_realized() && st.contiguous() {
             let root = get_movementroot(&*self, false);
             if root.st.contiguous()
                 && root != self
                 && st.shape().iter().product::<isize>() == root.shape.iter().product::<isize>()
             {
-                return root.clone().reshape(&st.shape());
+                return root.reshape(&st.shape());
             }
         }
         create_lazybuffer(
@@ -442,11 +478,7 @@ impl LazyBuffer {
             LazyOp::new(
                 optype,
                 vec![self.clone().into()],
-                Some(
-                    arg.iter()
-                        .map(|i| Arg::Num(i.to_le_bytes().to_vec()))
-                        .collect::<Vec<Arg>>(),
-                ),
+                Some(arg.iter().map(|i| Arg::Idx(*i)).collect::<Vec<Arg>>()),
             ),
             self.dtype.clone(),
             Some(Arc::new(self.base())),
@@ -454,6 +486,7 @@ impl LazyBuffer {
     }
 
     pub fn reshape(&self, arg: &[isize]) -> Self {
+        assert!(!arg.is_empty());
         if self.shape == arg {
             return self.clone();
         }
@@ -479,7 +512,7 @@ impl LazyBuffer {
                 .lazyop
                 .args
                 .iter()
-                .map(|v| v.to_num::<isize>())
+                .map(|v| v.to_idx())
                 .collect::<Vec<isize>>();
             return self.lazyop.src[0].clone().lb_mut().pad(&op_arg);
         }
@@ -514,14 +547,14 @@ impl LazyBuffer {
                                 .lazyop
                                 .args
                                 .iter()
-                                .map(|v| v.to_num::<isize>())
+                                .map(|v| v.to_idx())
                                 .collect::<Vec<isize>>(),
                         )
                     }
                     Movement::Expand => {
                         return self.lazyop.src[0].clone().lb_mut().permute(arg).expand(
                             &arg.iter()
-                                .map(|i| self.lazyop.args[*i as usize].to_num::<isize>())
+                                .map(|i| self.lazyop.args[*i as usize].to_idx())
                                 .collect::<Vec<isize>>(),
                         )
                     }
@@ -589,8 +622,8 @@ impl LazyBuffer {
                 .step_by(2)
                 .zip(arg.windows(2).step_by(2))
             {
-                aarg.push(be1[0].to_num::<isize>() + be2[0]);
-                aarg.push(be1[0].to_num::<isize>() + be2[1]);
+                aarg.push(be1[0].to_idx() + be2[0]);
+                aarg.push(be1[0].to_idx() + be2[1]);
             }
             return self.lazyop.src[0].clone().lb_mut().shrink(&aarg);
         }
@@ -611,7 +644,7 @@ impl LazyBuffer {
             return self.lazyop.src[0].clone().lb_mut().stride(
                 &arg.iter()
                     .zip(self.lazyop.args.iter())
-                    .map(|(a, aa)| a * aa.to_num::<isize>())
+                    .map(|(a, aa)| a * aa.to_idx())
                     .collect::<Vec<isize>>(),
             );
         }
@@ -631,8 +664,8 @@ pub fn create_lazybuffer(
         optype,
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
-        let ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
-        println!("{:?}", ret);
+        let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
+        //println!("{:?}", ret);
         return ret;
     }
     // # wop is the deduping key. i feel this used to compare more deeply
@@ -642,8 +675,8 @@ pub fn create_lazybuffer(
     //   return lazycache[wop]
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
-    let ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
-    println!("{:?}", ret);
+    let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
+    //println!("{:?}", ret);
     ret
 }
 
@@ -848,17 +881,17 @@ fn _realize_rand(buffer: &LazyBuffer) {
     }
 }
 
-fn _realize_const(buffer: &LazyBuffer) {
-    let mut buffer = buffer.clone();
-    unsafe {
-        if let Arg::Num(bytes) = &buffer.lazyop.args[0] {
-            let mut b = DEVICE.alloc(1, buffer.dtype);
-            Arc::get_mut_unchecked(&mut b).from_cpu(bytes.to_vec());
-            Arc::get_mut_unchecked(&mut buffer.device_buffer).replace(b);
-        } else {
-        }
-    }
-}
+// fn _realize_const(buffer: &LazyBuffer) {
+//     let mut buffer = buffer.clone();
+//     unsafe {
+//         if let Arg::Num(bytes) = &buffer.lazyop.args[0] {
+//             let mut b = DEVICE.alloc(1, buffer.dtype);
+//             Arc::get_mut_unchecked(&mut b).from_cpu(bytes.to_vec());
+//             Arc::get_mut_unchecked(&mut buffer.device_buffer).replace(b);
+//         } else {
+//         }
+//     }
+// }
 
 fn _realize_contiguous(buffer: &LazyBuffer) {
     todo!();
@@ -943,6 +976,22 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
     (ret_op.lo().clone(), base_bufs)
 }
 
+#[derive(Debug, Clone)]
+pub struct KernelCache {
+    name: String,
+    prg: String,
+    global_size: Vec<usize>,
+    local_size: Vec<usize>,
+    buffers: Vec<Arc<dyn Buffer>>
+}
+
+unsafe impl Send for KernelCache {}
+unsafe impl Sync for KernelCache {}
+
+lazy_static::lazy_static! {
+    pub static ref KERNEL_CACHED: Mutex<HashMap<String, KernelCache>>  = Default::default();
+}
+
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     while !schedule.is_empty() {
         let si = schedule.pop_front().unwrap();
@@ -955,7 +1004,6 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             OpType::Load(l) => {
                 match l {
                     Load::Rand => _realize_rand(&si.out),
-                    Load::Const => _realize_const(&si.out),
                     Load::From => _realize_from(&si.out),
                     Load::Custom => todo!(),
                     _ => (),
@@ -964,38 +1012,58 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             }
             _ => (),
         }
-        let mut lin = DEVICE.get_lin(si.ast.clone());
         if si.out.device_buffer.is_none() {
             _realize_empty(&si.out);
         }
         let mut bufs = vec![(*si.out.device_buffer).as_ref().unwrap().clone()];
         bufs.extend(v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()]);
-        lin.linearize();
-        let global_size = if let Some(mut gs) = lin.global_size.clone() {
-            gs.extend(vec![1; 3 - gs.len()]);
-            gs
+        let cached = KERNEL_CACHED
+            .lock()
+            .unwrap()
+            .get(&format!("{:?}", si))
+            .map(|v| (*v).clone());
+        if let Some(kernel) = cached {
+            println!("\ncached hit");
+            println!("{}", kernel.prg);
+            let prg = DEVICE.build(&kernel.name, &kernel.prg);
+            prg.run(
+                &kernel.buffers,
+                kernel.global_size.as_ref(),
+                Some(kernel.local_size.as_ref()),
+                &[],
+                &[],
+            );
         } else {
-            vec![]
-        };
-        let local_size = if let Some(mut ls) = lin.local_size.clone() {
-            ls.extend(vec![1; 3 - ls.len()]);
-            ls
-        } else {
-            vec![]
-        };
-        let (name, prg) = DEVICE.render(lin);
-        println!("\n{prg}");
-        //         let prg = r#"
-        //
-        // __kernel void E_10(__global float* data0, const __global float* data1, const __global float* data2) {
-        //   int gidx0 = get_group_id(0); /* 10 */
-        //   float val0 = data1[gidx0];
-        //   float val1 = data2[gidx0];
-        //   data0[gidx0] = (val0+val1);
-        // }
-        //         "#;
-        let prg = DEVICE.build(&name, &prg);
-        prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
+            println!("\nzero hit");
+            let mut lin = DEVICE.get_lin(si.ast.clone());
+            lin.linearize();
+            let global_size = if let Some(mut gs) = lin.global_size.clone() {
+                gs.extend(vec![1; 3 - gs.len()]);
+                gs
+            } else {
+                vec![]
+            };
+            let local_size = if let Some(mut ls) = lin.local_size.clone() {
+                ls.extend(vec![1; 3 - ls.len()]);
+                ls
+            } else {
+                vec![]
+            };
+            let (name, prg) = DEVICE.render(lin);
+            KERNEL_CACHED.lock().unwrap().insert(
+                format!("{:?}", si),
+                KernelCache {
+                    name: name.clone(),
+                    prg: prg.clone(),
+                    global_size: global_size.clone(),
+                    local_size: local_size.clone(),
+                    buffers: v![b.clone(), for b in bufs.iter()],
+                }
+            );
+            println!("{prg}");
+            let prg = DEVICE.build(&name, &prg);
+            prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
+        }
     }
 }
 
@@ -1088,7 +1156,7 @@ pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
     let srcs = vec![vec![ast.clone()], ast.src()].concat();
     for o in srcs {
         match o.optype() {
-            OpType::Unary(_) => return get_lazyop_info(&o).unary(),
+            OpType::Unary(_) => return get_lazyop_info(&o.lo().src[0]).unary(),
             OpType::Binary(b) => {
                 //println!("-------------------{}", o.lo().src[0].src().len());
                 //let Buffers::LazyBuffer(lb) = o.lo().src[0].lo().args[0].to_buf() else { panic!() };
@@ -1100,9 +1168,9 @@ pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
             }
             OpType::Ternary(t) => match t {
                 ops::Ternary::Where => {
-                    return get_lazyop_info(&o).ternary_where(
-                        get_lazyop_info(&o.lo().src[0]),
-                        get_lazyop_info(&o.lo().src[0]),
+                    return get_lazyop_info(&o.lo().src[0]).ternary_where(
+                        get_lazyop_info(&o.lo().src[1]),
+                        get_lazyop_info(&o.lo().src[2]),
                     )
                 }
                 t => println!("{t:?}"),
@@ -1125,4 +1193,42 @@ pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
         }
     }
     unreachable!()
+}
+
+pub fn replace_with_movement_ops(src: &LazyOpSrc, ops: &[(OpType, Vec<isize>)]) -> LazyBuffer {
+    match src {
+        LazyOpSrc::LazyOp(src) => {
+            assert!(matches!(
+                src.optype,
+                OpType::Unary(_) | OpType::Binary(_) | OpType::Ternary(_)
+            ));
+            let srcs = v![replace_with_movement_ops(z, ops), for z in src.src.iter()];
+            return srcs[0].e(
+                src.optype.clone(),
+                &srcs[1..]
+                    .iter()
+                    .map(|b| b.clone())
+                    .collect::<Vec<LazyBuffer>>(),
+                Some(src.args.clone()),
+            );
+        }
+        LazyOpSrc::LazyBuffer(y) => {
+            let mut y = y.clone();
+            for (op, arg) in ops {
+                match op {
+                    OpType::Movement(m) => match m {
+                        Movement::Reshape => y = y.reshape(arg),
+                        Movement::Permute => y = y.permute(arg),
+                        Movement::Pad => y = y.pad(arg),
+                        Movement::Expand => y = y.expand(arg),
+                        Movement::Shrink => y = y.shrink(arg),
+                        Movement::Stride => y = y.stride(arg),
+                        Movement::AsStrided => todo!(),
+                    },
+                    t => (),
+                }
+            }
+            return y;
+        }
+    }
 }

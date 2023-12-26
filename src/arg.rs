@@ -10,7 +10,6 @@ pub enum Arg {
     OpType(OpType),
     Op(LazyOp),
     Buffer(Buffers),
-    Num(Vec<u8>), // in little-endian bytes, for devices
     Usize(usize),
     Idx(isize),
     Shape(Vec<isize>),
@@ -26,7 +25,15 @@ impl Arg {
     pub fn to_str(&self) -> String {
         match self {
             Arg::Str(s) => s.clone(),
+            Arg::Idx(i) => i.to_string(),
             t => panic!("Can not to_str() {t:?}"),
+        }
+    }
+
+    pub fn to_idx(&self) -> isize {
+        match self {
+            Arg::Idx(s) => *s,
+            t => panic!("Can not to_idx() {t:?}"),
         }
     }
 
@@ -43,13 +50,6 @@ impl Arg {
             t => panic!("Can not to_buf() {t:?}"),
         }
     }
-
-    pub fn to_num<T: dtype::NumType>(&self) -> T {
-        match self {
-            Arg::Num(bytes) => T::from_le_bytes(bytes),
-            t => panic!("Can not to_buf() {t:?}"),
-        }
-    }
 }
 
 impl PartialEq for Arg {
@@ -59,7 +59,7 @@ impl PartialEq for Arg {
             (Arg::OpType(a), Arg::OpType(b)) => a == b,
             (Arg::Op(a), Arg::Op(b)) => a == b,
             (Arg::Buffer(a), Arg::Buffer(b)) => a == b,
-            (Arg::Num(a), Arg::Num(b)) => a == b,
+            //(Arg::Num(a), Arg::Num(b)) => a == b,
             (Arg::Usize(a), Arg::Usize(b)) => a == b,
             (Arg::Idx(a), Arg::Idx(b)) => a == b,
             (Arg::Shape(a), Arg::Shape(b)) => a == b,

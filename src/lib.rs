@@ -12,6 +12,7 @@ pub mod ops;
 pub mod renderer;
 pub mod shape;
 pub mod tensor;
+pub mod nn;
 
 pub mod prelude {
     pub use crate::device::{prelude::*, Buffer, Device, Program};

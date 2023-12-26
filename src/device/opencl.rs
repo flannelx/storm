@@ -147,7 +147,7 @@ impl Device for CLDevice {
             opencl3::command_queue::enqueue_read_buffer(
                 self.queue.get(),
                 src.ptr(),
-                CL_NON_BLOCKING,
+                CL_BLOCKING,
                 0,
                 src.size(),
                 dst as opencl3::memory::cl_mem,
@@ -158,7 +158,7 @@ impl Device for CLDevice {
         }
     }
 
-    fn copyin(&self, mut src: Vec<u8>, dst: &mut dyn Buffer) {
+    fn copyin(&self, mut src: Vec<u8>, dst: &dyn Buffer) {
         unsafe {
             opencl3::command_queue::enqueue_write_buffer(
                 self.queue.get(),

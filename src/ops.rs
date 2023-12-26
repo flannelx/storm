@@ -260,7 +260,7 @@ impl LazyOpSrc {
     pub fn lo(&self) -> &LazyOp {
         match self {
             LazyOpSrc::LazyOp(lo) => lo,
-            LazyOpSrc::LazyBuffer(_) => panic!("Lazyop cant turn into lazyop"),
+            LazyOpSrc::LazyBuffer(lb) => &lb.lazyop,
         }
     }
 

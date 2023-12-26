@@ -1116,6 +1116,7 @@ impl Function for Reshape {
         shape: Option<&[isize]>,
         const_: Option<Vec<u8>>,
     ) -> LazyBuffer {
+        assert!(!shape.as_ref().unwrap().is_empty());
         self.input_shape = Some(x.shape.clone());
         x.reshape(shape.expect("Reshape mlops expect a shape"))
     }

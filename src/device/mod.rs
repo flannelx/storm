@@ -30,7 +30,7 @@ pub trait Device: Send + Sync + core::fmt::Debug {
     fn alloc(&self, size: usize, dtype: Dtype) -> Arc<dyn Buffer>;
     fn build(&self, name: &str, program: &str) -> Arc<dyn Program>;
     fn copyout(&self, src: &dyn Buffer, dst: *mut u8);
-    fn copyin(&self, src: Vec<u8>, dst: &mut dyn Buffer);
+    fn copyin(&self, src: Vec<u8>, dst: &dyn Buffer);
     fn synchronize(&self);
     fn linearizer_opts(&self) -> LinearizerOptions {
         LinearizerOptions::default()

@@ -240,9 +240,6 @@ impl ShapeTracker {
         let new_view = self.views[self.views.len() - 1].reshape(new_shape);
         let mut views = self.views.clone();
         if let Some(nv) = new_view {
-            if nv.strides == [0, 41, 160, 6560, 25600, 0] {
-                panic!()
-            }
             views.pop();
             views.push(nv);
             return ShapeTracker { views };

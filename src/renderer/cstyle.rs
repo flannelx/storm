@@ -419,7 +419,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                     _ => panic!(),
                 };
                 let mut fint = FloatInt { float: 0.0, int: 0 };
-                if s.contains(".") {
+                if dtype.is_float() {
                     fint.float = s.parse::<f64>().unwrap();
                 } else {
                     fint.int = s.parse::<isize>().unwrap();

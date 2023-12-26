@@ -23,6 +23,11 @@ use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+//TODO: Should swtich to Wrapper Dtype what will have a num type like
+//          DtypeWrapper<T> {
+//              dtype: Dtype
+//              _: T
+//          }
 pub type TensorDefaultType = f32;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -73,7 +78,7 @@ impl Tensor {
         }
     }
 
-    pub fn from<T: num_traits::Num, V: Into<Vec<T>>>(data: V) -> Self {
+    pub fn from<T: num_traits::ToBytes, V: Into<Vec<T>>>(data: V) -> Self {
         let data = data.into();
         let buffer = LazyBuffer::from_cpu(data);
         Self {
@@ -193,7 +198,6 @@ impl Tensor {
             OpType::Load(Load::Rand),
             LazyOp::new(OpType::Load(Load::Rand), vec![], None),
             type_to_dtype::<TensorDefaultType>(),
-            None,
             None,
         ))
         // Self::_load(
@@ -415,33 +419,19 @@ impl Tensor {
     }
 
     pub fn sum_keepdim(&self, axis: isize) -> Self {
-        if self.shape().dims == [1, 1, 16, 63, 63, 4, 1, 1] {
-            panic!();
-        }
-        let axis = if axis < 0 {
-            self.shape().len() as isize + axis
-        } else {
-            axis
-        };
-        let mut shape = self.shape().clone();
-        shape[axis] = 1;
-        Sum::default().apply(&self, None, None, Some(shape.dims), None)
+        self._reduce(Sum::default(), [axis].to_vec(), true)
     }
 
     pub fn sum(&self, axis: isize) -> Self {
-        let mut shape = self.shape().clone();
-        let ret = self.sum_keepdim(axis);
-        let axis = if axis < 0 {
-            (shape.len() as isize + axis) as usize
-        } else {
-            axis as usize
-        };
-        shape.dims.remove(axis);
-        ret.reshape(shape)
+        self._reduce(Sum::default(), [axis].to_vec(), false)
     }
 
     pub fn sum_all(&self) -> Self {
-        self._sum(v![i as isize, for i in 0..self.shape().len()], false)
+        self._reduce(
+            Sum::default(),
+            v![i as isize, for i in 0..self.shape().len()],
+            false,
+        )
     }
 
     pub fn _reduce<F: 'static + Function>(
@@ -469,8 +459,9 @@ impl Tensor {
             );
         }
         let new_shape = v![if axis_.contains(&(i as isize)) { 1 } else { *s }, for (i, s) in self.shape().dims.iter().enumerate()];
+        assert!(!new_shape.is_empty());
         let ret = fxn.apply(self, None, None, Some(new_shape), None);
-        if keepdim {
+        if keepdim || shape.len() == 0 {
             ret
         } else {
             ret.reshape(shape)
@@ -481,36 +472,24 @@ impl Tensor {
         self.shape().len()
     }
 
+    pub fn _max(&self, axis: &[isize], keepdim: bool) -> Self {
+        self._reduce(Max::default(), axis.to_vec(), keepdim)
+    }
+
     pub fn max(&self, axis: isize) -> Self {
-        let mut shape = self.shape();
-        let _axis = if axis < 0 {
-            (self.shape().len() as isize + axis) as usize
-        } else {
-            axis as usize
-        };
-        // FIXME: Teenygrad just output a clone of self when axis >= self.ndim
-        if _axis >= self.ndim() {
-            return self.clone();
-        }
-        let ret = self.max_keepdim(axis);
-        shape.dims.remove(_axis);
-        ret.reshape(shape)
+        self._reduce(Max::default(), [axis].to_vec(), false)
     }
 
     pub fn max_keepdim(&self, axis: isize) -> Self {
-        let axis = if axis < 0 {
-            self.shape().len() as isize + axis
-        } else {
-            axis
-        };
-        let mut shape = self.shape().clone();
-        shape.dims.push(axis);
-        Max::default().apply(&self, None, None, Some(shape.dims), None)
+        self._reduce(Max::default(), [axis].to_vec(), true)
     }
 
     pub fn max_all(&self) -> Self {
-        self.reshape([self.shape().dims.iter().product::<isize>()])
-            .max_keepdim(0)
+        self._reduce(
+            Max::default(),
+            v![i as isize, for i in 0..self.shape().len()],
+            false,
+        )
     }
 
     pub fn _argmax(&self, axis: Option<isize>, keepdim: bool) -> Self {
