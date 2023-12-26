@@ -73,7 +73,12 @@ impl View {
     }
 
     pub fn expr_idxs(&self, idxs: &[ArcNode]) -> ArcNode {
-        assert!(idxs.len() == self.shape.len(), "{:?} {:?}", idxs, self.shape);
+        assert!(
+            idxs.len() == self.shape.len(),
+            "{:?} {:?}",
+            idxs,
+            self.shape
+        );
         let mut ret = vec![];
         if self.offset != 0 {
             ret.push(num(self.offset));

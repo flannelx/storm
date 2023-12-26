@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::arg::Arg;
 use crate::dtype::{_bool, float16, float32, int32};
-use crate::lazy::{STArc, LazyBufferId};
+use crate::lazy::{LazyBufferId, STArc};
 use crate::ops::{Binary, Ternary, Unary};
 use crate::prelude::*;
 use crate::renderer::cstyle::uops_to_cstyle;
@@ -120,7 +120,7 @@ impl Buffers {
     }
 
     pub fn buf_ptr(&self) -> Arc<Option<Arc<dyn Buffer>>> {
-        match self  {
+        match self {
             Buffers::MemBuffer(b) => b.src.device_buffer.clone(),
             Buffers::ConstBuffer(b) => b.src.device_buffer.clone(),
             Buffers::LazyBuffer(b) => b.device_buffer.clone(),

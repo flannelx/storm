@@ -252,8 +252,9 @@ impl Linearizer {
         } else if self.kernel.opts.has_local {
             self.global_size =
                 Some(v![(x.max().unwrap() + 1 ) as usize, for x in loop_global_idxs.iter().rev()]);
-            self.local_size =
-                Some(v![(x.max().unwrap() + 1 ) as usize, for x in loop_local_idxs.iter().rev().rev()]);
+            self.local_size = Some(
+                v![(x.max().unwrap() + 1 ) as usize, for x in loop_local_idxs.iter().rev().rev()],
+            );
 
             let mut extend_loop_uops = HashMap::new();
             for (i, x) in loop_global_idxs.iter().enumerate() {
@@ -348,7 +349,7 @@ impl Linearizer {
             //loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})  # noqa: E501
             let iter_ = v![(i, b.clone()), for (i, b) in  self.kernel.bufs.iter().enumerate().skip(1), if self.kernel.earlybufs.contains(b)];
 
-        //lb_ex = {b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs}
+            //lb_ex = {b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs}
             let lb_ex = v![(b, self.global_load(i, vec![global_idx.clone(), local_idxs.clone(), reduce_idxs.clone(), full_upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_];
             //panic!();
             loaded_buffers.extend(lb_ex);
@@ -485,7 +486,8 @@ impl Linearizer {
                             .last()
                             .unwrap()
                     })
-                    .unwrap() + 1;
+                    .unwrap()
+                    + 1;
                 self.uop(
                     UOps::END,
                     None,
@@ -872,7 +874,7 @@ impl Linearizer {
         assert!(buf_uop.is_some(), "buffer {i} wasn't UOped");
         let expanded_node = v![idx.expand(None), for idx in idxs.iter()];
         let _idxs = v![x.iter().rev().map(|n| n.clone()).collect::<Vec<ArcNode>>(), for x in cartesian_product(expanded_node.clone().into_iter().rev().collect())];
-        let store_offset  = v![(i, s), for (i, s) in izip!(_idxs, store)];
+        let store_offset = v![(i, s), for (i, s) in izip!(_idxs, store)];
         let upcast_dim = self.get_upcast_dim(i);
         if upcast_dim.len() == 1 && matches!(expanded_node[upcast_dim[0] as usize].len(), 2 | 4) {
             //TODO: float4

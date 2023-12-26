@@ -8,7 +8,7 @@ use opencl3::memory::CL_MEM_READ_WRITE;
 use opencl3::types::{CL_BLOCKING, CL_NON_BLOCKING};
 
 use crate::prelude::*;
-use crate::renderer::cstyle::CstyleLanguage;
+use crate::renderer::cstyle::{LanguageOpts, Renderer};
 use crate::shape::symbolic::CStyle;
 
 use super::{Buffer, Device, Program};
@@ -19,6 +19,7 @@ pub struct CLDevice {
     pub device: opencl3::device::Device,
     pub context: Arc<opencl3::context::Context>,
     pub queue: Arc<opencl3::command_queue::CommandQueue>,
+    pub renderer: Arc<dyn Renderer>,
 }
 
 unsafe impl Send for CLDevice {}
@@ -39,6 +40,7 @@ impl CLDevice {
             device,
             context: Arc::new(context),
             queue: Arc::new(queue),
+            renderer: Arc::new(CLRenderer::default()),
         }
     }
 }
@@ -177,20 +179,45 @@ impl Device for CLDevice {
         PENDING_COPY.lock().unwrap().0.clear();
     }
 
-    fn renderer(&self) -> CstyleLanguage {
-        CstyleLanguage {
-            kernel_prefix: "__kernel ".into(),
-            buffer_prefix: "__global ".into(),
-            smem_align: "__attribute__ ((aligned (16))) ".into(),
-            smem_prefix: "__local ".into(),
-            arg_int_prefix: "const int".into(),
-            half_prekernel: Some("#pragma OPENCL EXTENSION cl_khr_fp16 : enable".into()),
-            barrier: "barrier(CLK_LOCAL_MEM_FENCE);".into(),
-            float4: Some("(float4)".into()),
-            gid: (0..3).map(|i| format!("get_group_id({i})")).collect(),
-            lid: (0..3).map(|i| format!("get_local_id({i})")).collect(),
-            uses_vload: true,
-            ..Default::default()
+    fn renderer(&self) -> Arc<dyn Renderer> {
+        self.renderer.clone()
+    }
+}
+
+#[derive(Debug)]
+pub struct CLRenderer {
+    opts: Arc<LanguageOpts>,
+}
+
+impl Default for CLRenderer {
+    fn default() -> Self {
+        Self {
+            opts: Arc::new(LanguageOpts {
+                kernel_prefix: "__kernel ".into(),
+                buffer_prefix: "__global ".into(),
+                smem_align: "__attribute__ ((aligned (16))) ".into(),
+                smem_prefix: "__local ".into(),
+                arg_int_prefix: "const int".into(),
+                half_prekernel: Some("#pragma OPENCL EXTENSION cl_khr_fp16 : enable".into()),
+                barrier: "barrier(CLK_LOCAL_MEM_FENCE);".into(),
+                float4: Some("(float4)".into()),
+                gid: (0..3).map(|i| format!("get_group_id({i})")).collect(),
+                lid: (0..3).map(|i| format!("get_local_id({i})")).collect(),
+                uses_vload: true,
+                ..Default::default()
+            }),
         }
+    }
+}
+
+impl crate::ops::Op for CLRenderer {
+    fn mulacc(&self, a: &str, b: &str, c: &str) -> String {
+        format!("mad({a}, {b}, {c})")
+    }
+}
+
+impl Renderer for CLRenderer {
+    fn lang_opts(&self) -> Arc<LanguageOpts> {
+        self.opts.clone()
     }
 }

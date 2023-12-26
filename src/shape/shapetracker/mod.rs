@@ -245,7 +245,7 @@ impl ShapeTracker {
             }
             views.pop();
             views.push(nv);
-            return ShapeTracker { views } ;
+            return ShapeTracker { views };
         }
         views.push(view!(new_shape));
         // if new_view.is_none() {

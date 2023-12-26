@@ -1,4 +1,4 @@
-use super::{num, Node, ArcNode};
+use super::{num, ArcNode, Node};
 
 macro_rules! impl_core {
     ($op: tt, $op_fn: tt, $fn: ident) => {
@@ -107,7 +107,7 @@ macro_rules! impl_core {
                 num(self).$fn(rhs, $opt)
             }
         }
-    }
+    };
 }
 
 impl_core!(Add, add, _add);
@@ -160,4 +160,3 @@ impl std::hash::Hash for dyn Node {
         self.key().hash(state);
     }
 }
-

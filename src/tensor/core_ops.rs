@@ -64,7 +64,6 @@ core_impl!(Div, div);
 
 macro_rules! core_impl_num {
     ($op:tt, $fn:tt, $t:ty, $from:ident) => {
-
         impl core::ops::$op<$t> for Tensor {
             type Output = Tensor;
             fn $fn(self, rhs: $t) -> Self::Output {

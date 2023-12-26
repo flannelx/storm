@@ -6,7 +6,7 @@ use std::{cmp::PartialEq, collections::HashMap, sync::Arc};
 use itertools::iproduct;
 
 use crate::codegen::linearizer::cartesian_product;
-use crate::{v, izip};
+use crate::{izip, v};
 
 #[derive(Clone, Eq, Debug)]
 pub struct ArcNode(pub Arc<dyn Node>);
@@ -814,7 +814,7 @@ impl NumNode {
 
 impl Node for NumNode {
     fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
-       return self.to_arc()
+        return self.to_arc();
     }
 
     fn num_val(&self) -> Option<isize> {
@@ -1156,7 +1156,7 @@ impl Node for AndNode {
             if let Some(sub) = var_vars.get(&sarc) {
                 subed.push(sub.clone())
             } else {
-                return num(0)
+                return num(0);
             }
         }
         ands(&subed)

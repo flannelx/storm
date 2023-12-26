@@ -1,14 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
 pub use crate::prelude::*;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     arg::Arg,
-    shape::{shapetracker::ShapeTracker, symbolic::Variable}, lazy::LOArc,
+    lazy::LOArc,
+    shape::{shapetracker::ShapeTracker, symbolic::Variable},
 };
 
 #[allow(unused_variables)]
 pub trait Op: 'static + core::fmt::Debug + Send + Sync {
-
     fn neg(&self, x: &str) -> String {
         format!("(-{x})")
     }
@@ -158,7 +158,7 @@ pub enum Movement {
     Expand,
     Shrink,
     Stride,
-    AsStrided
+    AsStrided,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -176,7 +176,7 @@ pub enum Buffer {
     Load,
     Store,
     Const,
-    Mem
+    Mem,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -187,7 +187,7 @@ pub enum OpType {
     Ternary(Ternary),
     Movement(Movement),
     Load(Load),
-    Buffer(Buffer)
+    Buffer(Buffer),
 }
 
 macro_rules! optype_impl {
@@ -329,11 +329,7 @@ impl LazyOpsDefaultImpl for LazyOp {
 }
 
 impl LazyOp {
-    pub fn new(
-        optype: OpType,
-        src: Vec<LazyOpSrc>,
-        mut args: Option<Vec<Arg>>,
-    ) -> Self {
+    pub fn new(optype: OpType, src: Vec<LazyOpSrc>, mut args: Option<Vec<Arg>>) -> Self {
         let mut buffers = vec![];
         let src: Vec<LazyOpSrc> = src.into_iter().map(|s| s.into()).collect();
         for s in &src {

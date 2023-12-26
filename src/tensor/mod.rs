@@ -106,7 +106,10 @@ impl Tensor {
         DEVICE.synchronize();
         let mut bytes = (*self.buffer.device_buffer).as_ref().unwrap().to_cpu();
         let mut ret = vec![];
-        for b in bytes.windows(std::mem::size_of::<T>()).step_by(std::mem::size_of::<T>()) {
+        for b in bytes
+            .windows(std::mem::size_of::<T>())
+            .step_by(std::mem::size_of::<T>())
+        {
             ret.push(T::from_le_bytes(b))
         }
         ret

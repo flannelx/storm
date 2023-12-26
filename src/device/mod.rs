@@ -4,7 +4,7 @@ use crate::{
     codegen::linearizer::{Linearizer, LinearizerOptions},
     dtype::Dtype,
     ops::LazyOp,
-    renderer::cstyle::{uops_to_cstyle, CstyleLanguage},
+    renderer::cstyle::{uops_to_cstyle, LanguageOpts, Renderer},
     shape::symbolic::NodeOp,
 };
 
@@ -35,7 +35,7 @@ pub trait Device: Send + Sync + core::fmt::Debug {
     fn linearizer_opts(&self) -> LinearizerOptions {
         LinearizerOptions::default()
     }
-    fn renderer(&self) -> CstyleLanguage;
+    fn renderer(&self) -> Arc<dyn Renderer>;
     fn get_lin(&self, ast: LazyOp) -> Linearizer {
         Linearizer::new(ast, Some(self.linearizer_opts()))
     }

@@ -7,10 +7,11 @@ use crate::{
     lazy::LazyBuffer,
     ops::{Binary, Op, OpType},
 };
+use std::sync::Arc;
 use std::{collections::HashMap, fmt::Display};
 
 #[derive(Debug, Clone)]
-pub struct CstyleLanguage {
+pub struct LanguageOpts {
     pub size_prefix: String,
     pub generic_var_prefix: Option<String>,
     pub kernel_prefix: String,
@@ -33,7 +34,7 @@ pub struct CstyleLanguage {
     pub launch_bounds: bool,
 }
 
-impl Default for CstyleLanguage {
+impl Default for LanguageOpts {
     fn default() -> Self {
         Self {
             size_prefix: "int".into(),
@@ -60,42 +61,47 @@ impl Default for CstyleLanguage {
     }
 }
 
-impl Op for CstyleLanguage {}
+impl Op for LanguageOpts {}
 
-pub struct FloatInt {
-    pub float: f64,
-    pub int: isize,
-}
+pub trait Renderer: 'static + Send + Sync + Op {
+    fn lang_opts(&self) -> Arc<LanguageOpts>;
 
-impl CstyleLanguage {
-    pub fn render_cast(&self, x: &[&str], var_dtype: dtype::Dtype) -> String {
+    fn render_cast(&self, x: &[&str], var_dtype: dtype::Dtype) -> String {
         assert!(x.len() == var_dtype.sz);
-        assert!(self.float4.is_some());
+        assert!(self.lang_opts().float4.is_some());
         if var_dtype == dtype::_float4 {
             return format!(
                 "{}({})",
-                self.float4.as_ref().unwrap(),
+                self.lang_opts().float4.as_ref().unwrap(),
                 x.join(",").to_string()
             );
         }
         if var_dtype == dtype::_float2 {
             return format!(
                 "{}({})",
-                self.float4.as_ref().unwrap().replace("float4", "float2"),
+                self.lang_opts()
+                    .float4
+                    .as_ref()
+                    .unwrap()
+                    .replace("float4", "float2"),
                 x.join(",").to_string()
             );
         }
         if var_dtype == dtype::_int2 {
             return format!(
                 "{}({})",
-                self.float4.as_ref().unwrap().replace("float4", "int2"),
+                self.lang_opts()
+                    .float4
+                    .as_ref()
+                    .unwrap()
+                    .replace("float4", "int2"),
                 x.join(",").to_string()
             );
         }
         unimplemented!("no cast for {}", var_dtype)
     }
-
-    pub fn render_const(&self, x: FloatInt, var_dtype: dtype::Dtype) -> String {
+    //
+    fn render_const(&self, x: FloatInt, var_dtype: dtype::Dtype) -> String {
         let val = if var_dtype.is_float() {
             if x.float.is_nan() {
                 "NAN".to_string()
@@ -115,11 +121,11 @@ impl CstyleLanguage {
         // if var_dtype.sz > 1 {
         //     val
         // } else {
-        //     self.render_cast(&vec![val.as_str(); var_dtype.sz], var_dtype)
+        //     self.lang_opts().render_cast(&vec![val.as_str(); var_dtype.sz], var_dtype)
         // }
     }
 
-    pub fn render_load(
+    fn render_load(
         &self,
         output_dtype: dtype::Dtype,
         buf_name: &str,
@@ -131,7 +137,7 @@ impl CstyleLanguage {
             assert!(output_dtype == dtype::_float4, "images nust be float4");
             return format!("read_imagef({buf_name}, smp, {idx})");
         }
-        if self.uses_vload && buf_dtype == dtype::float16 {
+        if self.lang_opts().uses_vload && buf_dtype == dtype::float16 {
             return format!(
                 "vload_half({})",
                 if output_dtype.sz == 1 {
@@ -141,42 +147,42 @@ impl CstyleLanguage {
                 } + &format!("(0, {buf_name}+{idx})").to_string()
             );
         }
-        let cast = if output_dtype != buf_dtype {
-            format!("({})", output_dtype.c_name)
-        } else {
-            "".to_string()
-        };
         if output_dtype.sz > 1 {
             return format!(
-                "{cast}(*(({}{}{}*)({buf_name}+{idx})))",
+                "*(({}{}{}*)({buf_name}+{idx}))",
                 if local {
-                    &self.smem_prefix
+                    self.lang_opts().smem_prefix.clone()
                 } else {
-                    &self.buffer_prefix
+                    self.lang_opts().buffer_prefix.clone()
                 },
                 buf_dtype.c_name,
                 output_dtype.sz
             );
         }
-        if self.uses_ptr_arithmetic {
-            return format!("{cast}(*({buf_name}+{idx}))");
+        if self.lang_opts().uses_ptr_arithmetic {
+            return format!("*({buf_name}+{idx})");
         }
-        format!("{cast}({buf_name}[{idx}])")
+        let ret = format!("{buf_name}[{idx}]");
+        if output_dtype != buf_dtype {
+            self.render_cast(&[&ret], output_dtype)
+        } else {
+            ret
+        }
     }
 
-    pub fn render_local(&self, name: &str, size: usize) -> String {
-        self.smem_prefix.clone() + &format!("float {name}[{size}]")
+    fn render_local(&self, name: &str, size: usize) -> String {
+        self.lang_opts().smem_prefix.clone() + &format!("float {name}[{size}]")
     }
 
-    pub fn render_for(&self, expr: &str, min: impl Display, max: impl Display) -> String {
+    fn render_for(&self, expr: &str, min: &str, max: &str) -> String {
         format!("for (int {expr} = {min}; {expr} < {max}; {expr}++) {{")
     }
 
-    pub fn render_conditional(&self, cond: &str, x: &str, y: &str) -> String {
+    fn render_conditional(&self, cond: &str, x: &str, y: &str) -> String {
         format!("({cond})?({x}):{y}")
     }
 
-    pub fn render_kernel(
+    fn render_kernel(
         &self,
         function_name: &str,
         kernel: &[String],
@@ -198,16 +204,16 @@ impl CstyleLanguage {
                 )
             } else {
                 if dtype == &dtype::_arg_int32 {
-                    self.arg_int_prefix.to_string()
+                    self.lang_opts().arg_int_prefix.to_string()
                 } else {
                     (if i > 0 {
                         "const ".to_string()
                     } else {
                         "".to_string()
-                    }) + &self.buffer_prefix
+                    }) + &self.lang_opts().buffer_prefix
                         + dtype.c_name
                         + "*"
-                        + &self.buffer_suffix
+                        + &self.lang_opts().buffer_suffix
                 }
             };
             buftypes.push((name, s));
@@ -217,8 +223,8 @@ impl CstyleLanguage {
         let mut prg = {
             format!(
                 "{}void {}{function_name}(",
-                self.kernel_prefix,
-                if self.launch_bounds {
+                self.lang_opts().kernel_prefix,
+                if self.lang_opts().launch_bounds {
                     format!("__launch_bounds__ ({prod_local_size}, 1)")
                 } else {
                     "".to_string()
@@ -230,19 +236,21 @@ impl CstyleLanguage {
             .iter()
             .map(|(name, t)| format!("{t} {name}"))
             .collect::<Vec<String>>();
-        args.extend(self.extra_args.clone());
+        args.extend(self.lang_opts().extra_args.clone());
         prg += &args.join(", ");
 
         prg += &format!("{}{}{}{}", ") {\n", tmp, kernel.join("\n"), "\n}");
 
-        if self.half_prekernel.is_some() && bufs.iter().any(|(_, dtype)| *dtype == dtype::float16) {
-            prg = self.half_prekernel.as_ref().unwrap().clone() + "\n" + &prg;
+        if self.lang_opts().half_prekernel.is_some()
+            && bufs.iter().any(|(_, dtype)| *dtype == dtype::float16)
+        {
+            prg = self.lang_opts().half_prekernel.as_ref().unwrap().clone() + "\n" + &prg;
         }
 
         prg
     }
 
-    pub fn render_store(
+    fn render_store(
         &self,
         buf_name: &str,
         buf_dtype: dtype::Dtype,
@@ -255,7 +263,7 @@ impl CstyleLanguage {
             assert!(var_dtype == dtype::_float4);
             return format!("write_imagef({buf_name}, {idx}, {var_name});");
         }
-        if self.uses_vload && buf_dtype == dtype::float16 {
+        if self.lang_opts().uses_vload && buf_dtype == dtype::float16 {
             return format!(
                 "vstore_half{}({var_name}, 0, {buf_name}+{idx});",
                 if var_dtype.sz == 1 {
@@ -269,9 +277,9 @@ impl CstyleLanguage {
             return format!(
                 "*(({}{}{}*)({buf_name}+{idx})) = ({}{}){var_name};",
                 if local {
-                    &self.smem_prefix
+                    self.lang_opts().smem_prefix.clone()
                 } else {
-                    &self.buffer_prefix
+                    self.lang_opts().buffer_prefix.clone()
                 },
                 buf_dtype.c_name,
                 var_dtype.sz,
@@ -279,19 +287,24 @@ impl CstyleLanguage {
                 var_dtype.sz
             );
         }
-        if self.uses_ptr_arithmetic {
+        if self.lang_opts().uses_ptr_arithmetic {
             format!("*({buf_name}+{idx}) = {var_name};")
         } else {
             format!("{buf_name}[{idx}] = {var_name};")
         }
     }
 
-    pub fn render_if(&self, cond: &str) -> String {
+    fn render_if(&self, cond: &str) -> String {
         format!("if ({cond}) {{")
     }
 }
 
-pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -> String {
+pub struct FloatInt {
+    pub float: f64,
+    pub int: isize,
+}
+
+pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]) -> String {
     let mut local_size: Vec<usize> = vec![];
     let mut kernel: Vec<String> = vec![];
     let mut prekernel: Vec<String> = vec![];
@@ -333,7 +346,7 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 );
                 depth += 1;
             }
-            UOps::BARRIER => kk(&lang.barrier, &mut kernel, depth),
+            UOps::BARRIER => kk(&lang.lang_opts().barrier, &mut kernel, depth),
             UOps::END => {
                 depth -= 1;
                 kk("}", &mut kernel, depth);
@@ -359,14 +372,19 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                         || args[0] == OpType::Binary(Binary::Mul))
                 {
                     let a = r[&vin[0]].clone().replace("(", "").replace(")", "");
-                    println!("{:?}", vin);
                     val = match &args[0] {
-                        Arg::OpType(op) => lang.call(&op, vec![vec![a], v![r[&x].clone(), for x in vin[1..].iter()]].concat(), None),
+                        Arg::OpType(op) => lang.call(
+                            &op,
+                            vec![vec![a], v![r[&x].clone(), for x in vin[1..].iter()]].concat(),
+                            None,
+                        ),
                         _ => unreachable!(),
                     }
                 } else {
                     val = match &args[0] {
-                        Arg::OpType(op) => lang.call(&op, v![r[&x].clone(), for x in vin.iter()], None),
+                        Arg::OpType(op) => {
+                            lang.call(&op, v![r[&x].clone(), for x in vin.iter()], None)
+                        }
                         _ => unreachable!(),
                     }
                 }
@@ -377,10 +395,14 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                     kk(
                         &format!(
                             "{} {} = {val};",
-                            if lang.generic_var_prefix.is_some() {
-                                lang.generic_var_prefix.as_ref().unwrap().as_str()
+                            if lang.lang_opts().generic_var_prefix.is_some() {
+                                lang.lang_opts()
+                                    .generic_var_prefix
+                                    .as_ref()
+                                    .unwrap()
+                                    .to_string()
                             } else {
-                                dtype.c_name
+                                dtype.c_name.to_string()
                             },
                             ssa(u, "alu", &mut c, &mut r),
                         ),
@@ -405,10 +427,14 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 kk(
                     &format!(
                         "{} {} = {};",
-                        if lang.generic_var_prefix.is_some() {
-                            lang.generic_var_prefix.as_ref().unwrap().as_str()
+                        if lang.lang_opts().generic_var_prefix.is_some() {
+                            lang.lang_opts()
+                                .generic_var_prefix
+                                .as_ref()
+                                .unwrap()
+                                .to_string()
                         } else {
-                            dtype.c_name
+                            dtype.c_name.to_string()
                         },
                         ssa(u, "acc", &mut c, &mut r),
                         lang.render_const(fint, dtype.clone())
@@ -427,14 +453,14 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                     })
                     .collect::<Vec<String>>();
                 let xid = if args[1].starts_with("g") {
-                    &lang.gid
+                    lang.lang_opts().gid.clone()
                 } else {
-                    &lang.lid
+                    lang.lang_opts().lid.clone()
                 };
                 kk(
                     &format!(
                         "{} {} = {}; /* {} */",
-                        lang.size_prefix,
+                        lang.lang_opts().size_prefix,
                         args[1],
                         xid[args[0].parse::<usize>().unwrap()],
                         args[2]
@@ -483,10 +509,14 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 kk(
                     &format!(
                         "{} {} = {val};",
-                        if lang.generic_var_prefix.is_some() {
-                            lang.generic_var_prefix.as_ref().unwrap()
+                        if lang.lang_opts().generic_var_prefix.is_some() {
+                            lang.lang_opts()
+                                .generic_var_prefix
+                                .as_ref()
+                                .unwrap()
+                                .to_string()
                         } else {
-                            dtype.as_ref().unwrap().c_name
+                            dtype.as_ref().unwrap().c_name.to_string()
                         },
                         ssa(u, "val", &mut c, &mut r),
                     ),
@@ -547,10 +577,14 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                     kk(
                         &format!(
                             "{} {} = {val}",
-                            if lang.generic_var_prefix.is_some() {
-                                lang.generic_var_prefix.as_ref().unwrap()
+                            if lang.lang_opts().generic_var_prefix.is_some() {
+                                lang.lang_opts()
+                                    .generic_var_prefix
+                                    .as_ref()
+                                    .unwrap()
+                                    .to_string()
                             } else {
-                                dtype.as_ref().unwrap().c_name
+                                dtype.as_ref().unwrap().c_name.to_string()
                             },
                             ssa(u, "cast", &mut c, &mut r)
                         ),
@@ -560,7 +594,7 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 }
             }
             UOps::DEFINE_LOCAL => {
-                if lang.external_local_bufs {
+                if lang.lang_opts().external_local_bufs {
                     prekernel.push(lang.render_local(
                         &args[0].to_str(),
                         args[1].to_str().parse::<usize>().unwrap(),

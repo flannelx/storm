@@ -224,7 +224,6 @@ macro_rules! view {
     };
 }
 
-
 mod tests {
     use std::collections::HashMap;
     #[test]
