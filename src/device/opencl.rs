@@ -100,6 +100,7 @@ impl Buffer for CLBuffer {
         let mut dst = vec![0u8; self.size()];
         let ptr = dst.as_mut_ptr() as *mut u8;
         DEVICE.copyout(self, ptr);
+        DEVICE.synchronize();
         dst
     }
 
@@ -146,7 +147,7 @@ impl Device for CLDevice {
             opencl3::command_queue::enqueue_read_buffer(
                 self.queue.get(),
                 src.ptr(),
-                CL_BLOCKING,
+                CL_NON_BLOCKING,
                 0,
                 src.size(),
                 dst as opencl3::memory::cl_mem,

@@ -93,7 +93,8 @@ impl Tensor {
 
     // TODO: This is probably stuck with generic param.
     //      Or have three verions of this. 1. T, 2. String, 3. Raw bytes
-    pub fn to_vec<T: NumType>(&self) -> Vec<T> {
+    pub fn to_vec(&self) -> Vec<TensorDefaultType> {
+        type T = TensorDefaultType;
         assert!(
             std::any::type_name::<T>().split("::").last().unwrap() == self.dtype(),
             "cannot return Tensor<{}> to Vec<{}>",
@@ -103,14 +104,13 @@ impl Tensor {
         if self.buffer.device_buffer.is_none() {
             self.realize();
         }
-        DEVICE.synchronize();
         let mut bytes = (*self.buffer.device_buffer).as_ref().unwrap().to_cpu();
         let mut ret = vec![];
         for b in bytes
             .windows(std::mem::size_of::<T>())
             .step_by(std::mem::size_of::<T>())
         {
-            ret.push(T::from_le_bytes(b))
+            ret.push(T::from_le_bytes(b.try_into().unwrap()))
         }
         ret
     }
