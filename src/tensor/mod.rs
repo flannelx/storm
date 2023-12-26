@@ -100,18 +100,16 @@ impl Tensor {
             self.dtype(),
             std::any::type_name::<T>().split("::").last().unwrap()
         );
-        // let ret = self.realize();
-        // let mut ret = self.buffer.to_cpu(); // this should be aysnc;
-        // DEVICE.synchronize();
-        // let ret_ptr = ret.as_mut_ptr() as *mut T;
-        // let len = ret.len();
-        // let size = std::mem::size_of::<T>();
-        // unsafe {
-        //     let ret_t = Vec::from_raw_parts(ret.as_mut_ptr() as *mut T, len / size, len / size);
-        //     std::mem::forget(ret);
-        //     ret_t
-        // }
-        todo!()
+        if self.buffer.device_buffer.is_none() {
+            self.realize();
+        }
+        DEVICE.synchronize();
+        let mut bytes = (*self.buffer.device_buffer).as_ref().unwrap().to_cpu();
+        let mut ret = vec![];
+        for b in bytes.windows(std::mem::size_of::<T>()).step_by(std::mem::size_of::<T>()) {
+            ret.push(T::from_le_bytes(b))
+        }
+        ret
     }
 
     // ------------ Load
@@ -186,8 +184,7 @@ impl Tensor {
 
     pub fn rand<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
-        Self::from_buf(
-        LazyBuffer::new(
+        Self::from_buf(LazyBuffer::new(
             "GPU",
             crate::shape::ShapeTracker::from_shape(&shape.dims),
             OpType::Load(Load::Rand),
@@ -441,8 +438,7 @@ impl Tensor {
     }
 
     pub fn sum_all(&self) -> Self {
-        self.reshape([self.shape().dims.iter().product::<isize>()])
-            .sum_keepdim(0)
+        self._sum(v![i as isize, for i in 0..self.shape().len()], false)
     }
 
     pub fn _reduce<F: 'static + Function>(

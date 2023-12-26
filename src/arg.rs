@@ -63,7 +63,12 @@ impl PartialEq for Arg {
             (Arg::Usize(a), Arg::Usize(b)) => a == b,
             (Arg::Idx(a), Arg::Idx(b)) => a == b,
             (Arg::Shape(a), Arg::Shape(b)) => a == b,
-            _ => panic!(),
+            (Arg::Str(a), Arg::Idx(b)) => a.parse::<isize>().is_ok_and(|n| n == *b),
+            (Arg::Idx(a), Arg::Str(b)) => b.parse::<isize>().is_ok_and(|n| n == *a),
+            (a, b) => {
+                println!("ARG Compare: {a:?} != {b:?} ??");
+                false
+            }
         }
     }
 }

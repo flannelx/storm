@@ -73,7 +73,12 @@ impl Program for CLProgram {
             for b in bufs {
                 ek.set_arg(&b.ptr());
             }
-            ek.set_global_work_size(global_size[0]);
+
+            //check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))  # noqa: E501
+            ek.set_global_work_sizes(global_size);
+            if let Some(lws) = local_size {
+                ek.set_local_work_sizes(lws);
+            }
             ek.enqueue_nd_range(&self.device.queue)
                 .expect("enqueue failed");
         }
@@ -139,7 +144,7 @@ impl Device for CLDevice {
             opencl3::command_queue::enqueue_read_buffer(
                 self.queue.get(),
                 src.ptr(),
-                CL_NON_BLOCKING,
+                CL_BLOCKING,
                 0,
                 src.size(),
                 dst as opencl3::memory::cl_mem,

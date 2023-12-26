@@ -1,5 +1,6 @@
 use crate::arg::Arg;
 use crate::codegen::kernel::Buffers;
+use crate::v;
 use crate::{
     codegen::linearizer::{UOp, UOps},
     dtype,
@@ -232,7 +233,7 @@ impl CstyleLanguage {
         args.extend(self.extra_args.clone());
         prg += &args.join(", ");
 
-        prg += &format!("{}{}{}{}", ") {\n", tmp, kernel.join("\n"), "\n");
+        prg += &format!("{}{}{}{}", ") {\n", tmp, kernel.join("\n"), "\n}");
 
         if self.half_prekernel.is_some() && bufs.iter().any(|(_, dtype)| *dtype == dtype::float16) {
             prg = self.half_prekernel.as_ref().unwrap().clone() + "\n" + &prg;
@@ -284,6 +285,10 @@ impl CstyleLanguage {
             format!("{buf_name}[{idx}] = {var_name};")
         }
     }
+
+    pub fn render_if(&self, cond: &str) -> String {
+        format!("if ({cond}) {{")
+    }
 }
 
 pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -> String {
@@ -293,6 +298,7 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
     let mut bufs = vec![];
     let mut depth: usize = 1;
     let kk = |s: &str, kernel: &mut Vec<String>, depth: usize| {
+        //if s == "float alu0 = (gidx0*4)" { panic!() };
         kernel.push("  ".repeat(depth) + s);
     };
     let mut c: HashMap<&str, usize> = HashMap::new();
@@ -353,21 +359,14 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                         || args[0] == OpType::Binary(Binary::Mul))
                 {
                     let a = r[&vin[0]].clone().replace("(", "").replace(")", "");
-                    let b = r[&vin[1]].clone();
+                    println!("{:?}", vin);
                     val = match &args[0] {
-                        Arg::OpType(op) => lang.call(&op, vec![a, b], None),
+                        Arg::OpType(op) => lang.call(&op, vec![vec![a], v![r[&x].clone(), for x in vin[1..].iter()]].concat(), None),
                         _ => unreachable!(),
                     }
                 } else {
-                    let a = r[&vin[0]].clone();
-                    let b = r[&vin[1]].clone();
-                    let c = if vin.len() > 2 {
-                        r[&vin[2]].clone()
-                    } else {
-                        "".to_string()
-                    };
                     val = match &args[0] {
-                        Arg::OpType(op) => lang.call(&op, vec![a, b, c], None),
+                        Arg::OpType(op) => lang.call(&op, v![r[&x].clone(), for x in vin.iter()], None),
                         _ => unreachable!(),
                     }
                 }
@@ -377,7 +376,7 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 } else {
                     kk(
                         &format!(
-                            "{} {} = {val}",
+                            "{} {} = {val};",
                             if lang.generic_var_prefix.is_some() {
                                 lang.generic_var_prefix.as_ref().unwrap().as_str()
                             } else {
@@ -405,7 +404,7 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 }
                 kk(
                     &format!(
-                        "{} {} = {}",
+                        "{} {} = {};",
                         if lang.generic_var_prefix.is_some() {
                             lang.generic_var_prefix.as_ref().unwrap().as_str()
                         } else {
@@ -449,13 +448,11 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 r.insert(u.clone(), args[1].clone());
             }
             UOps::CONST => {
-                // r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
-                // Huh?????????????????????????
                 assert!(args.len() >= 1);
                 match &args[0] {
                     Arg::Str(s) => {
                         let mut fint = FloatInt { float: 0.0, int: 0 };
-                        if s.contains(".") {
+                        if dtype.as_ref().unwrap().is_float() {
                             fint.float = s.parse::<f64>().unwrap();
                         } else {
                             fint.int = s.parse::<isize>().unwrap();
@@ -498,26 +495,44 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                 );
             }
             UOps::STORE => {
-                if vin.len() == 2 {
-                    kk(
-                        &format!("{} = {};", r[&vin[0]], r[&vin[1]]),
-                        &mut kernel,
-                        depth,
-                    );
-                } else if vin.len() == 3 {
-                    assert!(vin[0].dtype.is_some() && vin[2].dtype.is_some());
-                    kk(
-                        &lang.render_store(
-                            &r[&vin[0]],
-                            vin[0].dtype.as_ref().unwrap().clone(),
-                            &r[&vin[2]],
-                            vin[2].dtype.as_ref().unwrap().clone(),
-                            &r[&vin[1]].replace("(", "").replace(")", ""),
-                            matches!(vin[0].uop, UOps::DEFINE_LOCAL),
-                        ),
-                        &mut kernel,
-                        depth,
-                    );
+                // if vin.len() == 2 {
+                //     kk(
+                //         &format!("{} = {};", r[&vin[0]], r[&vin[1]]),
+                //         &mut kernel,
+                //         depth,
+                //     );
+                // } else if vin.len() == 3 {
+                //     assert!(vin[0].dtype.is_some() && vin[2].dtype.is_some());
+                //     kk(
+                //         &lang.render_store(
+                //             &r[&vin[0]],
+                //             vin[0].dtype.as_ref().unwrap().clone(),
+                //             &r[&vin[2]],
+                //             vin[2].dtype.as_ref().unwrap().clone(),
+                //             &r[&vin[1]].replace("(", "").replace(")", ""),
+                //             matches!(vin[0].uop, UOps::DEFINE_LOCAL),
+                //         ),
+                //         &mut kernel,
+                //         depth,
+                //     );
+                // }
+                if vin.len() > 3 {
+                    kk(&lang.render_if(&r[&vin[3]]), &mut kernel, depth)
+                }
+                kk(
+                    &lang.render_store(
+                        &r[&vin[0]],
+                        vin[0].dtype.as_ref().unwrap().clone(),
+                        &r[&vin[2]],
+                        vin[2].dtype.as_ref().unwrap().clone(),
+                        &r[&vin[1]].replace("(", "").replace(")", ""),
+                        matches!(vin[0].uop, UOps::DEFINE_LOCAL),
+                    ),
+                    &mut kernel,
+                    depth,
+                );
+                if vin.len() > 3 {
+                    kk("}", &mut kernel, depth)
                 }
             }
             UOps::CAST => {
@@ -583,7 +598,15 @@ pub fn uops_to_cstyle(lang: CstyleLanguage, function_name: &str, uops: &[UOp]) -
                     ),
                 );
             }
-            UOps::PHI => todo!(),
+            UOps::PHI => {
+                kk(
+                    &format!("{} = {};", r[&vin[0]], r[&vin[1]]),
+                    &mut kernel,
+                    depth,
+                );
+                r.insert(u.clone(), r[&vin[0]].clone());
+            }
+            UOps::IF => todo!(),
         }
     }
     lang.render_kernel(function_name, &kernel, &bufs, &local_size, &prekernel)

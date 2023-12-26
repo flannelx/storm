@@ -43,7 +43,7 @@ impl View {
         let mut expr = if let Some(n) = valid { vec![n] } else { vec![] };
         if let Some(mask) = &self.mask {
             let mut acc = 1;
-            for (&ns, &(x, y)) in self.shape.iter().zip(mask).rev() {
+            for (&ns, &(x, y)) in self.shape.iter().rev().zip(mask.iter().rev()) {
                 if x != 0 || y != ns {
                     let base = (&idx / acc) % ns;
                     expr.extend([base.ge(num(x)), base.lt(num(y))]);
@@ -73,7 +73,7 @@ impl View {
     }
 
     pub fn expr_idxs(&self, idxs: &[ArcNode]) -> ArcNode {
-        assert!(idxs.len() == self.shape.len());
+        assert!(idxs.len() == self.shape.len(), "{:?} {:?}", idxs, self.shape);
         let mut ret = vec![];
         if self.offset != 0 {
             ret.push(num(self.offset));

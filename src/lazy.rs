@@ -299,6 +299,7 @@ impl LazyBuffer {
                         //WARN: not sure if this is correct 100% of the time for getting shape.
                         //st: ShapeTracker::from_shape(&op.get_lazyops().last().unwrap().args[0].to_buf().st().shape()),
                         st: ShapeTracker::from_shape(&info.shape),
+                        src: Arc::new(self.base()),
                     }
                     .into(),
                 )]),
@@ -437,7 +438,7 @@ impl LazyBuffer {
                 OpType::Movement(m) => match m {
                     Movement::Reshape => self.reshape(arg),
                     Movement::Expand => self.expand(arg),
-                    _ => todo!(),
+                    _ => unreachable!(),
                 },
                 _ => unreachable!(),
             };
@@ -646,8 +647,8 @@ pub fn create_lazybuffer(
         optype,
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
-        let ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
-        println!("{:?}", ret);
+        let mut ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
+        ret.device_buffer = ret.base().device_buffer.clone();
         return ret;
     }
     // # wop is the deduping key. i feel this used to compare more deeply
@@ -657,8 +658,8 @@ pub fn create_lazybuffer(
     //   return lazycache[wop]
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
-    let ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
-    println!("{:?}", ret);
+    let mut ret = LazyBuffer::new(device, st, optype, op, dtype, None, base);
+    ret.device_buffer = ret.base().device_buffer.clone();
     ret
 }
 
@@ -917,6 +918,7 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
                             idx: base_bufs.iter().position(|b| b == &x.base()).unwrap() + 1,
                             dtype: x.dtype.clone(),
                             st,
+                            src: Arc::new(x.base()),
                         }
                         .into(),
                     )]),
@@ -933,6 +935,7 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
                             val: x.base().lazyop.args[0].to_str(),
                             dtype: x.dtype.clone(),
                             st,
+                            src: Arc::new(x.base()),
                         }
                         .into(),
                     )]),
@@ -979,11 +982,60 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             }
             _ => (),
         }
-
-        let (name, prg) = DEVICE.render(si.ast.clone());
-
-
-        //let prg = DEVICE.build(name, program)
+        let mut lin = DEVICE.get_lin(si.ast.clone());
+        let mut mem_bufs = vec![];
+        for b in lin.kernel.bufs.iter() {
+            if let Buffers::MemBuffer(b) = b {
+                mem_bufs.push(b.clone())
+            }
+        }
+        for mem_buf in mem_bufs.iter() {
+            if mem_buf.src.device_buffer.is_none() {
+                //println!("alloc mem {mem_buf:?}");
+                _realize_empty(&mem_buf.src);
+            }
+        }
+        lin.linearize();
+        let bufs = lin
+            .kernel
+            .bufs
+            .iter()
+            .map(|b| b.buf_ptr())
+            .collect::<Vec<Arc<Option<Arc<dyn Buffer>>>>>();
+        let global_size = if let Some(mut gs) = lin.global_size.clone() {
+            gs.extend(vec![1; 3 - gs.len()]);
+            gs
+        } else {
+            vec![]
+        };
+        let local_size = if let Some(mut ls) = lin.local_size.clone() {
+            ls.extend(vec![1; 3 - ls.len()]);
+            ls
+        } else {
+            vec![]
+        };
+        let (name, prg) = DEVICE.render(lin);
+        println!("\n{prg}");
+        //         let prg = r#"
+        //
+        // __kernel void E_10(__global float* data0, const __global float* data1, const __global float* data2) {
+        //   int gidx0 = get_group_id(0); /* 10 */
+        //   float val0 = data1[gidx0];
+        //   float val1 = data2[gidx0];
+        //   data0[gidx0] = (val0+val1);
+        // }
+        //         "#;
+        let prg = DEVICE.build(&name, &prg);
+        prg.run(
+            &mem_bufs
+                .iter()
+                .map(|m| (*m.src.device_buffer).as_ref().unwrap().clone())
+                .collect::<Vec<Arc<dyn Buffer>>>(),
+            &global_size,
+            Some(&local_size),
+            &[],
+            &[],
+        );
     }
 }
 

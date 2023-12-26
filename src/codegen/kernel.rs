@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::arg::Arg;
 use crate::dtype::{_bool, float16, float32, int32};
-use crate::lazy::STArc;
+use crate::lazy::{STArc, LazyBufferId};
 use crate::ops::{Binary, Ternary, Unary};
 use crate::prelude::*;
 use crate::renderer::cstyle::uops_to_cstyle;
@@ -60,6 +60,7 @@ pub struct MemBuffer {
     pub idx: usize,
     pub dtype: dtype::Dtype,
     pub st: ShapeTracker,
+    pub src: Arc<LazyBuffer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -67,6 +68,7 @@ pub struct ConstBuffer {
     pub val: String,
     pub dtype: dtype::Dtype,
     pub st: ShapeTracker,
+    pub src: Arc<LazyBuffer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -114,6 +116,15 @@ impl Buffers {
         match self {
             Buffers::MemBuffer(b) => b.idx,
             t => panic!("{t:?} does not have a idx"),
+        }
+    }
+
+    pub fn buf_ptr(&self) -> Arc<Option<Arc<dyn Buffer>>> {
+        match self  {
+            Buffers::MemBuffer(b) => b.src.device_buffer.clone(),
+            Buffers::ConstBuffer(b) => b.src.device_buffer.clone(),
+            Buffers::LazyBuffer(b) => b.device_buffer.clone(),
+            Buffers::LocalBuffer(_) => todo!(),
         }
     }
 }
@@ -301,7 +312,7 @@ impl Kernel {
             for j in 0..shapes.len() {
                 if mergeable {
                     *rets[j].last_mut().unwrap() =
-                        (rets[j].last().unwrap().0 * shapes[j][j], strides[j][i]);
+                        (rets[j].last().unwrap().0 * shapes[j][i], strides[j][i]);
                 } else {
                     rets[j].push((shapes[j][i], strides[j][i]));
                 }

@@ -5,6 +5,7 @@ use std::{cmp::PartialEq, collections::HashMap, sync::Arc};
 
 use itertools::iproduct;
 
+use crate::codegen::linearizer::cartesian_product;
 use crate::{v, izip};
 
 #[derive(Clone, Eq, Debug)]
@@ -254,7 +255,7 @@ pub trait Node: core::fmt::Debug {
 }
 
 pub fn iter_idxs(idxs: &[ArcNode]) -> std::vec::IntoIter<Vec<usize>> {
-    v![x.into_iter().rev().collect(), for x in iproduct!(v![v![x, for x in v.min().unwrap() as usize..(v.max().unwrap() + 1) as usize], for v in idxs.iter().rev()])].into_iter()
+    v![x.into_iter().rev().collect(), for x in cartesian_product(v![v![x, for x in v.min().unwrap() as usize..(v.max().unwrap() + 1) as usize], for v in idxs.iter().rev()])].into_iter()
 }
 
 pub fn create_node(ret: ArcNode) -> ArcNode {

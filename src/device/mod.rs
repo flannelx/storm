@@ -1,6 +1,12 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{dtype::Dtype, ops::LazyOp, shape::symbolic::NodeOp, codegen::linearizer::{LinearizerOptions, Linearizer}, renderer::cstyle::{uops_to_cstyle, CstyleLanguage}};
+use crate::{
+    codegen::linearizer::{Linearizer, LinearizerOptions},
+    dtype::Dtype,
+    ops::LazyOp,
+    renderer::cstyle::{uops_to_cstyle, CstyleLanguage},
+    shape::symbolic::NodeOp,
+};
 
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = Arc::new(opencl::CLDevice::new());
@@ -30,14 +36,12 @@ pub trait Device: Send + Sync + core::fmt::Debug {
         LinearizerOptions::default()
     }
     fn renderer(&self) -> CstyleLanguage;
-    fn render(&self, ast: LazyOp) -> (String, String) {
-        let mut lin = Linearizer::new(ast, Some(self.linearizer_opts()));
+    fn get_lin(&self, ast: LazyOp) -> Linearizer {
+        Linearizer::new(ast, Some(self.linearizer_opts()))
+    }
+    fn render(&self, mut lin: Linearizer) -> (String, String) {
         lin.linearize();
         let prg = uops_to_cstyle(self.renderer(), &lin.name, &lin.uops);
-        println!("{}\n{}", lin.name, prg);
-        for u in lin.uops {
-            println!("{:?}", u.uop);
-        };
         (lin.name, prg)
     }
 }

@@ -99,7 +99,7 @@ pub trait Op: 'static + core::fmt::Debug + Send + Sync {
                 }
             }
             OpType::Reduce(rop) => {
-                assert!(args.len() >= 1 && shape.is_some());
+                assert!(args.len() >= 1 && shape.is_some(), "{:?} {:?}", args, shape);
                 match rop {
                     Reduce::Sum => self.sum(&args[0], shape.unwrap()),
                     Reduce::Max => self.max(&args[0], shape.unwrap()),
