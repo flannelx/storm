@@ -739,10 +739,12 @@ impl Linearizer {
         let mut amt = 1;
         let mut dim: Option<isize> = None;
         let upcast_dim = self.get_upcast_dim(i);
-        let float4_expand = idxs[0].expand(None);
-        if upcast_dim.len() == 1 && (float4_expand.len() == 4 || float4_expand.len() == 2) {
-            dim = Some(upcast_dim[0]);
-            amt = float4_expand.len();
+        if upcast_dim.len() == 1 {
+            let float4_expand = idxs[0].expand(None);
+            if (float4_expand.len() == 4 || float4_expand.len() == 2) {
+                dim = Some(upcast_dim[0]);
+                amt = float4_expand.len();
+            }
         }
 
         let expand_vars = v![rename_var(idx.expand_idx(), &format!("_uidx{j}")), for (j, idx) in idxs.iter().enumerate()];
@@ -752,7 +754,7 @@ impl Linearizer {
             let (mut gidx, mut gvalid) = self.kernel.sts[i].expr_idxs(Some(
                 vec![
                     &fake_idxs[..d],
-                    &[float4_expand[0].clone()],
+                    //            &[float4_expand[0].clone()],
                     &fake_idxs[d + 1..],
                 ]
                 .concat(),
@@ -949,20 +951,20 @@ impl Linearizer {
             }
             _ => (),
         }
-        for v in x.src.iter() {
-            assert!(
-                self.ast_parse(
-                    v.lo().clone(),
-                    acc,
-                    offs,
-                    loaded_buffers,
-                    do_reduce,
-                    loop_ctx
-                )
-                .len()
-                    > 0
-            );
-        }
+        // for v in x.src.iter() {
+        //     assert!(
+        //         self.ast_parse(
+        //             v.lo().clone(),
+        //             acc,
+        //             offs,
+        //             loaded_buffers,
+        //             do_reduce,
+        //             loop_ctx
+        //         )
+        //         .len()
+        //             > 0
+        //     );
+        // }
         let values = v![self.ast_parse(v.lo().clone(), acc, offs, loaded_buffers, do_reduce, loop_ctx), for v in x.src.iter()];
         let ops = HashMap::from([
             (OpType::Reduce(Reduce::Sum), OpType::Binary(Binary::Add)),

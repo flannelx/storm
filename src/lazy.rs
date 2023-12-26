@@ -209,7 +209,7 @@ impl LazyBuffer {
     pub fn _const(&self, val: impl Display) -> Self {
         Self::loadop(
             OpType::Load(Load::Const),
-            &vec![],
+            &vec![1],
             self.dtype.clone(),
             &self.device,
             Some(vec![Arg::Str(val.to_string())]),
@@ -561,41 +561,35 @@ impl LazyBuffer {
                                 .collect::<Vec<isize>>(),
                         )
                     }
-                    // Movement::Reshape if matches!(self.lazyop.src[0], LazyOpSrc::LazyBuffer(_)) => {
-                    //     if let Some(shape_idx_groups) =
-                    //         get_contraction(&self.lazyop.src[0].lb().shape, &self.shape)
-                    //     {
-                    //         for i in 0..self.lazyop.src.len() {
-                    //             if matches!(self.lazyop.src[i], LazyOpSrc::LazyBuffer(_))
-                    //                 && self.lazyop.src[0].lb().id == self.id
-                    //             {
-                    //                 //self.lazyop.src.remove(i);
-                    //             }
-                    //         }
-                    //         return self.lazyop.src[0]
-                    //             .lb()
-                    //             .permute(
-                    //                 &arg.iter()
-                    //                     .map(|&i| shape_idx_groups[i as usize].clone())
-                    //                     .collect::<Vec<Vec<isize>>>()
-                    //                     .concat(),
-                    //             )
-                    //             .reshape(&self.st.permute(arg).shape());
-                    //     }
-                    // }
+                    Movement::Reshape if matches!(self.lazyop.src[0], LazyOpSrc::LazyBuffer(_)) => {
+                        if let Some(shape_idx_groups) =
+                            get_contraction(&self.lazyop.src[0].lb().shape, &self.shape)
+                        {
+                            self.lazyop.clone().src[0].lb_mut().children.remove(self);
+                            return self.lazyop.src[0]
+                                .lb()
+                                .permute(
+                                    &arg.iter()
+                                        .map(|&i| shape_idx_groups[i as usize].clone())
+                                        .collect::<Vec<Vec<isize>>>()
+                                        .concat(),
+                                )
+                                .reshape(&self.st.permute(arg).shape());
+                        }
+                    }
                     _ => (),
                 },
                 OpType::Reduce(_) => {
+                    let arg_shape = self.lazyop.args[0].to_shape();
                     let narg = arg
                         .iter()
-                        .map(|i| self.lazyop.args[*i as usize].clone())
-                        .collect::<Vec<Arg>>();
-                    let s_clone = self.clone();
+                        .map(|i| arg_shape[*i as usize])
+                        .collect::<Vec<isize>>();
                     let mut src = self.lazyop.src[0].clone();
                     let optype = &self.lazyop.optype;
-                    src.lb_mut().children.remove(&s_clone);
-                    //return src.permute(arg).r(cast(ReduceOps, rop), narg)
-                    todo!()
+                    src.lb_mut().children.remove(self);
+                    println!(">>>>{:?}", arg);
+                    return src.lb().permute(arg).r(optype.clone(), &narg)
                 }
                 t => (),
             };
@@ -663,12 +657,15 @@ pub fn create_lazybuffer(
     base: Option<Arc<LazyBuffer>>,
 ) -> LazyBuffer {
     let optype = op.optype.clone();
+    if optype == Load::Const && st.shape().is_empty() {
+        panic!();
+    }
     if matches!(
         optype,
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
         let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-        //println!("{:?}", ret);
+        println!("{} {:?}", ret.id, ret);
         return ret;
     }
     // # wop is the deduping key. i feel this used to compare more deeply
@@ -679,7 +676,7 @@ pub fn create_lazybuffer(
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
     let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-    //println!("{:?}", ret);
+    println!("{} {:?}", ret.id, ret);
     ret
 }
 
@@ -905,6 +902,7 @@ fn _realize_contiguous(buffer: &LazyBuffer) {
 #[rustfmt::skip]
 fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
     let mut rng = rand::thread_rng();
+    println!("wating to alloc rand");
     let ptr = match dtype.type_name {
         "f16" => { let mut ret = (0..size).map(|_| rng.gen::<f16>()).collect::<Vec<f16>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
         "f32" => { let mut ret = (0..size).map(|_| rng.gen::<f32>()).collect::<Vec<f32>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
@@ -919,6 +917,7 @@ fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
         "i64" => { let mut ret = (0..size).map(|_| rng.gen::<i64>()).collect::<Vec<i64>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
         t => panic!("unable gen type t={t}"),
     };
+    println!("finished alloc rand");
     unsafe { Vec::<u8>::from_raw_parts(ptr, size * dtype.size, size * dtype.size)}
 }
 
@@ -1087,7 +1086,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
 pub struct FlopCounter {
     shape: Vec<isize>,
     dtype: Dtype,
-    flops: usize,
+    flops: f64,
     mem: HashMap<usize, usize>,
 }
 
@@ -1100,7 +1099,7 @@ impl FlopCounter {
         Self {
             shape: arg.st().shape(),
             dtype: arg.dtype(),
-            flops: 0,
+            flops: 0.,
             mem: HashMap::from([(arg.idx(), arg.dtype().size * arg.st().size() as usize)]),
         }
     }
@@ -1108,7 +1107,7 @@ impl FlopCounter {
         Self {
             shape: arg.st().shape(),
             dtype: arg.dtype(),
-            flops: 0,
+            flops: 0.,
             mem: HashMap::new(),
         }
     }
@@ -1132,7 +1131,7 @@ impl FlopCounter {
     fn unary(self) -> Self {
         Self {
             dtype: self.dtype,
-            flops: self.flops * self.shape.iter().product::<isize>() as usize,
+            flops: self.flops * self.shape.iter().product::<isize>() as f64,
             shape: self.shape,
             mem: self.mem,
         }
@@ -1141,7 +1140,7 @@ impl FlopCounter {
     fn binary(mut self, y: Self) -> Self {
         self.mem.extend(y.mem);
         Self {
-            flops: self.flops + y.flops + self.shape.iter().product::<isize>() as usize,
+            flops: self.flops + y.flops + self.shape.iter().product::<isize>() as f64,
             shape: self.shape,
             dtype: least_upper_dtype(&[self.dtype.clone(), y.dtype.clone()]),
             mem: self.mem,
@@ -1151,7 +1150,7 @@ impl FlopCounter {
         Self {
             shape: new_shape.to_vec(),
             dtype: self.dtype,
-            flops: self.flops * self.shape.iter().product::<isize>() as usize,
+            flops: self.flops * self.shape.iter().product::<isize>() as f64,
             mem: self.mem,
         }
     }
@@ -1159,7 +1158,7 @@ impl FlopCounter {
         self.mem.extend(y.mem);
         self.mem.extend(z.mem);
         Self {
-            flops: self.flops + y.flops + z.flops + self.shape.iter().product::<isize>() as usize,
+            flops: self.flops + y.flops + z.flops + self.shape.iter().product::<isize>() as f64,
             shape: self.shape,
             dtype: least_upper_dtype(&[y.dtype.clone(), z.dtype.clone()]),
             mem: self.mem,
@@ -1180,7 +1179,7 @@ pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
             }
             OpType::Reduce(_) => {
                 //println!("REDUCE REDUCE REDUCE\n{:?}", o);
-                return get_lazyop_info(&o.lo().src[0]).reduce(&o.lo().args[0].shape());
+                return get_lazyop_info(&o.lo().src[0]).reduce(&o.lo().args[0].to_shape());
             }
             OpType::Ternary(t) => match t {
                 ops::Ternary::Where => {

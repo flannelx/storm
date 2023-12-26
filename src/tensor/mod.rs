@@ -264,7 +264,9 @@ impl Tensor {
 
     // ------------ Movement
     pub fn reshape<S: Into<Shape>>(&self, shape: S) -> Self {
-        Reshape::default().apply(self, None, None, Some(shape.into().dims), None)
+        let shape = shape.into().dims;
+        let numel = self.shape().numel() as isize;
+        Reshape::default().apply(self, None, None, Some(v![if s == -1 { -numel / shape.iter().product::<isize>()} else { s }, for (i, &s) in shape.iter().enumerate()]), None)
     }
 
     pub fn expand<S: Into<Shape>>(&self, shape: S) -> Self {
@@ -461,10 +463,14 @@ impl Tensor {
         let new_shape = v![if axis_.contains(&(i as isize)) { 1 } else { *s }, for (i, s) in self.shape().dims.iter().enumerate()];
         assert!(!new_shape.is_empty());
         let ret = fxn.apply(self, None, None, Some(new_shape), None);
-        if keepdim || shape.len() == 0 {
+        if keepdim {
             ret
         } else {
-            ret.reshape(shape)
+            if shape.len() == 0 {
+                ret.reshape([1])
+            } else {
+                ret.reshape(shape)
+            }
         }
     }
 
@@ -620,14 +626,26 @@ impl Tensor {
 
     // self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))
     pub fn max_pool2d(&self) -> Self {
-        let k_ = [2, 2];
-        let stride = 2;
-        let dilation = 1;
-        let mut ret = self._pool(k_, stride, dilation);
-        for i in -2..0 {
-            ret = ret.max(i);
-        }
-        ret
+        self._max_pool2d(None, None, None)
+    }
+
+    pub fn _max_pool2d(&self, kernel_size: Option<usize>, stride: Option<usize>, dilation: Option<usize>) -> Self {
+        let kernel_size = if kernel_size.is_some() {
+            kernel_size.unwrap()
+        } else {
+            2
+        };
+        let stride = if stride.is_some() {
+            stride.unwrap()
+        } else {
+            1
+        };
+        let dilation = if dilation.is_some() {
+            dilation.unwrap()
+        } else {
+            1
+        };
+        self._pool([kernel_size, kernel_size], stride, dilation)._max(&v![-(i as isize), for i in (0..2).rev()], false)
     }
 
 
@@ -894,9 +912,11 @@ impl Tensor {
                 let g = g.as_ref().unwrap();
                 assert!(
                     t.shape() == g.shape(),
-                    "grad shape must match tensor shape, {} != {}",
+                    "grad shape must match tensor shape, {} != {} \n {} {t}\n {} {g}",
                     g.shape(),
-                    t.shape()
+                    t.shape(),
+                    t.buffer.id,
+                    g.buffer.id,
                 );
                 let mut t_grad = t.grad.lock().unwrap();
                 if t_grad.is_none() {
@@ -1124,8 +1144,7 @@ impl Tensor {
     //   return out * (math.prod(out.shape)/math.prod(self.shape))
     pub fn mean(&self) -> Self {
         let out = self.sum_all();
-        let o_numel = out.shape().numel();
-        out * o_numel as isize / self.shape().numel() as isize
+        out / self.shape().numel() as isize
     }
 
     // def abs(self): return self.relu() + (-self).relu()

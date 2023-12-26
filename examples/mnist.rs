@@ -19,17 +19,17 @@ pub struct ConvNet {
     pub c1: Tensor,
     pub c2: Tensor,
     pub l1: Tensor,
+    pub l2: Tensor,
 }
 
 impl Default for ConvNet {
     fn default() -> Self {
         let conv = 3;
-        let cin = 8;
-        let cout = 16;
         Self {
-            c1: Tensor::scaled_uniform([16, 1, conv, conv]),
-            c2: Tensor::scaled_uniform([64, 16, conv, conv]),
-            l1: Tensor::scaled_uniform([1600, 128]),
+            c1: Tensor::scaled_uniform([32, 1, conv, conv]),
+            c2: Tensor::scaled_uniform([64, 32, conv, conv]),
+            l1: Tensor::scaled_uniform([9216, 128]),
+            l2: Tensor::scaled_uniform([128, 1]),
         }
     }
 }
@@ -38,10 +38,12 @@ impl ConvNet {
     fn forward(&self, x: &Tensor) -> Tensor {
         let d1 = x.shape().numel() / 28 / 28;
         let mut y = x.reshape([d1, 1, 28, 28]);
-        y = y.conv2d(&self.c1).relu().max_pool2d();
-        y = y.conv2d(&self.c2).relu().max_pool2d();
-        y = y.reshape([y.shape()[0], y.shape().numel() as isize / y.shape()[0]]);
-        y = y.matmul(&self.l1).log_softmax();
+        y = y.conv2d(&self.c1).sigmoid();
+        y = y.conv2d(&self.c2).sigmoid().flatten().reshape([-1, self.l1.shape()[0]]);
+        println!("y:{} l1:{}",y.shape(), self.l1.shape());
+        y = y.matmul(&self.l1).sigmoid();
+        println!("y:{} l2:{}",y.shape(), self.l2.shape());
+        y = y.matmul(&self.l2).sigmoid();
         y
     }
 
@@ -136,11 +138,12 @@ fn train<Optim: Optimizer>(
     for i in 0..epoch {
         let x = Tensor::from(&*img_batched[i]).reshape([batch_size, 1, 28, 28]);
         let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
-        let out = model.forward(&x).realize();
-        let mut loss = out.sparse_categorical_crossentropy(&y);
-        loss.realize();
+        let out = model.forward(&x);
+        let mut loss = (out - y).mean();
+        //loss.realize();
         //println!("out {:?}",out.to_vec());
-        // loss.backward();
+        //loss.backward();
+        loss.realize();
         // optim.step();
         // let pred = out.detach().argmax(-1);
         // let accuracy = (pred._eq(&y.detach())).mean();
