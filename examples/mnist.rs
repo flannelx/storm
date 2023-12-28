@@ -40,9 +40,7 @@ impl ConvNet {
         let mut y = x.reshape([d1, 1, 28, 28]);
         y = y.conv2d(&self.c1).sigmoid();
         y = y.conv2d(&self.c2).sigmoid().flatten().reshape([-1, self.l1.shape()[0]]);
-        println!("y:{} l1:{}",y.shape(), self.l1.shape());
         y = y.matmul(&self.l1).sigmoid();
-        println!("y:{} l2:{}",y.shape(), self.l2.shape());
         y = y.matmul(&self.l2).sigmoid();
         y
     }
@@ -138,11 +136,11 @@ fn train<Optim: Optimizer>(
     for i in 0..epoch {
         let x = Tensor::from(&*img_batched[i]).reshape([batch_size, 1, 28, 28]);
         let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
-        let mut out = model.forward(&x).mean();
-        out.backward();
-        //let mut loss = (out - y).mean();
-        //loss.realize();
-        //println!("out {:?}",out.to_vec());
+        let mut out = model.forward(&x);
+        //out.backward();
+        let mut loss = (out - y).abs().mean();
+        loss.realize();
+        println!("loss {:?}",loss.to_vec());
         //loss.backward();
         //loss.realize();
         // optim.step();

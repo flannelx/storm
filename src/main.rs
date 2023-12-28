@@ -1,10 +1,22 @@
 use storm::prelude::*;
 
 fn main() {
-    let mut a = Tensor::rand([16,1]);
-    a = a.expand([16,20]).permute([1,0]).mean();
-    a.backward();
-    //println!("{:?}", c.to_vec());
-    // let b = Tensor::scaled_uniform([10,10]);
-    // let c = b.matmul(&a) * 2;
+    let a = Tensor::rand([10, 10]);
+    let b = Tensor::rand([10, 10]);
+    println!("---------------------------");
+    println!("{:?}", (&a * &b).to_vec());
+    //println!("{:?}", (&a * &b).to_vec());
+    println!("{:?}", (&a.realize() * &b.realize()).to_vec());
+    // println!(
+    //     "a lbid: {:?} buf_ptr: {:?} weights: {:?}",
+    //     a.buffer.id,
+    //     (*a.buffer.device_buffer).as_ref().unwrap().ptr(),
+    //     a.to_vec()
+    // );
+    // println!(
+    //     "b lbid: {:?} buf_ptr: {:?} weights: {:?}",
+    //     b.buffer.id,
+    //     (*b.buffer.device_buffer).as_ref().unwrap().ptr(),
+    //     b.to_vec()
+    // );
 }

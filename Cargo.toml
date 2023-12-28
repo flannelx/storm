@@ -18,3 +18,4 @@ rand = "0.8.5"
 [dev-dependencies]
 float-cmp = "0.9.0"
 mnist = { git = "https://github.com/allen-dai/mnist" }
+sdl2 = "0.36.0"

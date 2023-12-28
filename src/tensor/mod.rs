@@ -23,11 +23,6 @@ use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-//TODO: Should swtich to Wrapper Dtype what will have a num type like
-//          DtypeWrapper<T> {
-//              dtype: Dtype
-//              _: T
-//          }
 pub type TensorDefaultType = f32;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -853,7 +848,7 @@ impl Tensor {
             "backward can only be called for scalar tensors, but it has shape {}",
             self.shape()
         );
-        (*self.grad.lock().unwrap()) = Some(Self::ones([1]));
+        (*self.grad.lock().unwrap()) = Some(Tensor::from([1f32]));
         let deepwalked = self.deepwalk().into_iter();
         let _deepwalked_len = deepwalked.len();
         for mut t0 in deepwalked.rev() {
@@ -976,6 +971,8 @@ impl Tensor {
 
     pub fn mul(&self, rhs: &Self) -> Self {
         let (a, b) = Tensor::_broadcast(&self, &rhs);
+        assert!(Arc::ptr_eq(&self.buffer.device_buffer, &a.buffer.device_buffer));
+        assert!(Arc::ptr_eq(&rhs.buffer.device_buffer, &b.buffer.device_buffer));
         Mul {
             need_input_grad: [a.require_grad, b.require_grad],
             ..Default::default()
@@ -992,9 +989,10 @@ impl Tensor {
         .apply(&a, Some(&b), None, None, None)
     }
 
-    pub fn assign(&mut self, x: Self) {
+    pub fn assign(&mut self, x: Self) -> Self {
         assert!(self.shape() == x.shape());
         self.buffer = x.buffer;
+        self.clone()
     }
 
     pub fn arange(to: f32) -> Self {
@@ -1173,8 +1171,18 @@ impl Tensor {
     }
 
     pub fn realize(&self) -> Self {
-        run_schedule(self.buffer.schedule(HashSet::new()));
+        let mut seen = HashSet::new();
+        run_schedule(self.buffer.schedule(&mut seen));
         self.clone()
+    }
+
+    pub fn corealize(list: Vec<Tensor>) {
+        let mut seen = HashSet::new();
+        let mut sched = std::collections::VecDeque::new();
+        for t in list {
+            sched.extend(t.buffer.schedule(&mut seen));
+        }
+        run_schedule(sched);
     }
 
     pub fn detach(&self) -> Self {

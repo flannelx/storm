@@ -14,7 +14,15 @@ pub fn adam_with<'a>(params: &[*mut Tensor], p: &[f32]) -> LAMP {
     assert!(p.len() > 0, "need lr");
     let mut default = [0.001, 0.9, 0.999, 1e-8, 0.0];
     default.iter_mut().zip(p).for_each(|(d, p)| *d = *p);
-    LAMP::new(params.to_vec(), default[0], default[1], default[2], default[3], default[4], true)
+    LAMP::new(
+        params.to_vec(),
+        default[0],
+        default[1],
+        default[2],
+        default[3],
+        default[4],
+        true,
+    )
 }
 
 //def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
@@ -94,7 +102,18 @@ impl Optimizer for LAMP {
     }
 
     fn realize(&mut self) {
-        ()
+        let mut lst = vec![];
+        for b in self.buffers.iter() {
+            unsafe {
+                lst.push((**b).clone());
+            }
+        }
+        for b in self.params.iter() {
+            unsafe {
+                lst.push((**b).clone());
+            }
+        }
+        Tensor::corealize(lst);
     }
 
     fn step(&mut self) {
@@ -108,16 +127,20 @@ impl Optimizer for LAMP {
 
                 // self.m[i].assign(self.m[i] * self.b1 + g * (1.0 - self.b1)).realize()
                 // self.v[i].assign(self.v[i] * self.b2 + (g * g) * (1.0 - self.b2)).realize()
-                self.m[i] = (&self.m[i] * self.b1 + &g * (1.0 - self.b1)).realize();
-                self.v[i] = (&self.v[i] * self.b2 + (&g * &g) * (1.0 - self.b2)).realize();
+                let mi = (&self.m[i] * self.b1 + &g * (1.0 - self.b1)).realize();
+                let vi = (&self.v[i] * self.b2 + (&g * &g) * (1.0 - self.b2)).realize();
+                self.m[i].assign(mi);
+                self.v[i].assign(vi);
                 // m_hat = self.m[i] / (1.0 - self.b1**self.t)
-                let m_hat = &self.m[i] / (1.0 - self.b1.powf(self.t));
+                let m_hat = (&self.m[i] / (1.0 - self.b1.powf(self.t)));
                 // v_hat = self.v[i] / (1.0 - self.b2**self.t)
                 let v_hat = &self.v[i] / (1.0 - self.b2.powf(self.t));
                 // up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
                 let up = (m_hat / (v_hat.sqrt() + self.eps)) + t.detach() * self.wd;
                 let r = if !self.adam { todo!() } else { 1.0 };
-                t.assign(&t.detach() - &(&self.lr * r * up));
+                let tmp = t.detach() - &(&self.lr * r * &up);
+                //println!("{:?}", tmp.to_vec());
+                t.assign(t.detach() - &(&self.lr * r * up)).realize();
 
                 // just in case _ctx is attach in Function{}.apply() but shouldnt matter, but
                 // why not

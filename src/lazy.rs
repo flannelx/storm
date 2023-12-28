@@ -295,7 +295,7 @@ impl LazyBuffer {
         !self.is_realized() && self.base().lazyop.optype == Load::Const
     }
 
-    pub fn schedule(&self, mut seen: HashSet<Self>) -> VecDeque<ScheduleItem> {
+    pub fn schedule(&self, mut seen: &mut HashSet<Self>) -> VecDeque<ScheduleItem> {
         if seen.contains(self) || self.is_realized() || self.is_unrealized_const() {
             return VecDeque::new();
         }
@@ -313,7 +313,7 @@ impl LazyBuffer {
 
         let mut ret = VecDeque::new();
         for x in op.buffers.iter() {
-            ret.extend(x.schedule(seen.clone()))
+            ret.extend(x.schedule(seen))
         }
 
         let (mut op, base_bufs) = _replace_bufferops(op);
@@ -1019,6 +1019,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     //already allocated.
     while !schedule.is_empty() {
         let mut si = schedule.pop_front().unwrap();
+        println!("si optype {:?}", si.ast.optype);
         for x in si.inputs.iter() {
             if !x.is_realized() {
                 panic!("Can't run schedule, {x:?} isnt't realized")
@@ -1032,6 +1033,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                     Load::Custom => todo!(),
                     _ => (),
                 }
+                println!("allocating mem for lb id:{}", si.out.id);
                 continue;
             }
             _ => (),
@@ -1042,8 +1044,8 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             .get(&format!("{:?}", si))
             .map(|v| (*v).clone());
         if let Some(kernel) = cached {
-            //println!("\ncached hit");
-            //println!("{}", kernel.prg);
+            // println!("\ncached hit");
+            // println!("{}", kernel.prg);
             let prg = DEVICE.build(&kernel.name, &kernel.prg);
             unsafe {
                 Arc::get_mut_unchecked(&mut si.out.device_buffer)

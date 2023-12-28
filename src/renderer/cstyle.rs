@@ -112,10 +112,18 @@ pub trait Renderer: 'static + Send + Sync + Op {
                     "INFINITY".to_string()
                 }
             } else {
-                format!("{:?}", x.float) + "f"
+                if x.float < 0.0 {
+                format!("({:?}f)", x.float)
+                } else {
+                format!("{:?}f", x.float)
+                }
             }
         } else {
-            x.int.to_string()
+            if x.int < 0 {
+                "(".to_string() + &x.int.to_string() + &")"
+            } else {
+                x.int.to_string()
+            }
         };
         val
         // if var_dtype.sz > 1 {
