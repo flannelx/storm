@@ -164,11 +164,16 @@ impl View {
                 .all(|(&s, (&x, &st))| (s == x && x == 0) || (s > 0 && (x % s) == 0)));
             return view!(new_shape);
         }
-        assert!(self
-            .shape
-            .iter()
-            .zip(new_shape.iter().zip(self.strides.iter()))
-            .all(|(&s, (&x, &st))| s == x || (s == 1 && st == 0)), "{:?} {:?} {:?}", self.shape, new_shape, self.strides);
+        assert!(
+            self.shape
+                .iter()
+                .zip(new_shape.iter().zip(self.strides.iter()))
+                .all(|(&s, (&x, &st))| s == x || (s == 1 && st == 0)),
+            "{:?} {:?} {:?}",
+            self.shape,
+            new_shape,
+            self.strides
+        );
         let mask = if let Some(m) = &self.mask {
             Some(
                 m.iter()
@@ -220,68 +225,6 @@ impl View {
             return Some(view!(new_shape));
         }
 
-        // if self
-        //     .shape
-        //     .iter()
-        //     .filter(|&&x| x != 1)
-        //     .eq(new_shape.iter().filter(|&&x| x != 1))
-        // {
-        //     let mut new_strides: Vec<isize> = self
-        //         .shape
-        //         .iter()
-        //         .zip(self.strides.iter())
-        //         .filter(|(&x, _)| x != 1)
-        //         .rev()
-        //         .map(|(_, &y)| y)
-        //         .collect();
-        //     let new_strides_tuple: Vec<isize> = new_shape
-        //         .iter()
-        //         .map(|&x| {
-        //             if x == 1 {
-        //                 0
-        //             } else {
-        //                 new_strides.pop().unwrap()
-        //             }
-        //         })
-        //         .collect();
-        //     let mut new_mask_tuple = None;
-        //     if let Some(m) = &self.mask {
-        //         for (&x, &y) in self.shape.iter().zip(m.iter()) {
-        //             if x == 1 && y != (0, 1) {
-        //                 new_mask_tuple = Some(vec![(0, 0); new_shape.len()]);
-        //                 break;
-        //             }
-        //         }
-        //         if new_mask_tuple.is_none() {
-        //             let mut new_mask: Vec<(isize, isize)> = self
-        //                 .shape
-        //                 .iter()
-        //                 .zip(m.iter())
-        //                 .filter(|(&sh, _)| sh != 1)
-        //                 .map(|(_, &mm)| mm)
-        //                 .rev()
-        //                 .collect();
-        //             new_mask_tuple = Some(
-        //                 new_shape
-        //                     .iter()
-        //                     .map(|&x| {
-        //                         if x == 1 {
-        //                             (0, 1)
-        //                         } else {
-        //                             new_mask.pop().unwrap()
-        //                         }
-        //                     })
-        //                     .collect::<Vec<(isize, isize)>>(),
-        //             );
-        //         }
-        //     }
-        //     return Some(View::new(
-        //         new_shape,
-        //         Some(new_strides_tuple),
-        //         Some(self.offset),
-        //         new_mask_tuple,
-        //     ));
-        // }
         let mut strides = vec![];
         let r_new_shape: Vec<isize> = new_shape.iter().rev().map(|i| *i).collect();
         let mut _break = false;
@@ -309,7 +252,13 @@ impl View {
         if !_break {
             strides.extend(vec![0; new_shape.len() - strides.len()]);
             strides.reverse();
-            return Some(View::new(new_shape, Some(strides), Some(self.offset), None));
+            let (mask, off_mask, extra)  = _reshape_mask(self, new_shape);
+            let total_offset = if let Some(om) = off_mask {
+                v![off * s, for (off, s) in izip!(om, strides.iter())].iter().sum()
+            } else {
+                0
+            };
+            return Some(View::new(new_shape, Some(strides), Some(self.offset + total_offset), mask));
         }
         None
     }
@@ -396,4 +345,71 @@ impl View {
         };
         View::new(&new_shape, Some(strides), Some(offset), mask)
     }
+}
+
+fn _reshape_mask(
+    view: &View,
+    new_shape: &[isize],
+) -> (Option<Vec<(isize, isize)>>, Option<Vec<isize>>, bool) {
+    if view.mask.is_none() {
+        return (view.mask.clone(), None, false);
+    }
+    let mask = view.mask.as_ref().unwrap();
+    let mut new_mask = vec![];
+    let mut r_mask = mask.iter().rev();
+    let mut r_shape = view.shape.iter().rev();
+    let mut r_new_shape = new_shape.iter().rev();
+    let (mut current_stride, mut off, mut offsets, mut old_dim, mut new_dim, mut mask) = (
+        1,
+        0,
+        vec![],
+        *r_shape.next().unwrap_or(&1),
+        *r_new_shape.next().unwrap_or(&1),
+        r_mask.next().unwrap_or(&(0, 1)).clone(),
+    );
+    while new_mask.len() < new_shape.len() {
+        let (mut l, mut r) = mask;
+        let mut next_stride = new_dim * current_stride;
+        if old_dim >= next_stride {
+            offsets.push(off);
+            if old_dim == next_stride {
+                new_mask.push((l / current_stride, (r - 1) / current_stride + 1));
+                (current_stride, off, offsets, old_dim, new_dim, mask) = (
+                    1,
+                    0,
+                    vec![],
+                    *r_shape.next().unwrap_or(&1),
+                    *r_new_shape.next().unwrap_or(&1),
+                    r_mask.next().unwrap_or(&(0, 1)).clone(),
+                );
+                if mask.1 - mask.0 < 1 {
+                    return (Some(vec![(0, 0); new_shape.len()]), None, false);
+                }
+            } else {
+                if ((l % next_stride != 0 || r % next_stride != 0)
+                    && l / next_stride != (r - 1) / next_stride)
+                {
+                    return (view.mask.clone(), None, false);
+                }
+                new_mask.push((
+                    l % next_stride / current_stride,
+                    (r - 1) % next_stride / current_stride + 1,
+                ));
+                (current_stride, new_dim) = (next_stride, *r_new_shape.next().unwrap_or(&1));
+            }
+        } else {
+            // FIXME:
+            return (view.mask.clone(), None, true);
+        }
+    }
+    for mask in r_mask {
+        if mask != &(0, 1) {
+            return (Some(vec![(0, 0); new_shape.len()]), None, false);
+        }
+    }
+    (
+        Some(new_mask.iter().map(|m| m.clone()).rev().collect()),
+        Some(offsets),
+        false,
+    )
 }

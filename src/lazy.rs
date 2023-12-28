@@ -120,8 +120,8 @@ impl core::fmt::Debug for LazyBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<LB dtype={:?} op={:?} st={:?}>",
-            self.dtype.type_name, self.lazyop.optype, self.st.views
+            "<LB {:?} dtype={:?} op={:?} st={:?}>",
+            self.shape, self.dtype.type_name, self.lazyop.optype, self.st.views
         )
     }
 }
@@ -356,7 +356,10 @@ impl LazyBuffer {
         let srcs: Vec<LazyOpSrc> = srcs
             .iter()
             .map(|x| {
-                if matches!(x.lazyop.optype, OpType::Binary(_)) {
+                if matches!(x.lazyop.optype, OpType::Binary(_))
+                    && x.children.len() == 0
+                    && !x.is_realized()
+                {
                     (*x.lazyop).clone().into()
                 } else {
                     x.clone().into()
@@ -441,30 +444,46 @@ impl LazyBuffer {
     }
 
     pub fn _movement_op(&self, st: ShapeTracker, optype: OpType, arg: &[isize]) -> Self {
-        if matches!(self.lazyop.optype, OpType::Binary(_))
-            && !self.is_realized()
-            && (matches!(
+        if !self.is_realized()
+            && matches!(self.lazyop.optype, OpType::Binary(_))
+            && self.children.len() == 0
+        {
+            if matches!(
                 optype,
                 OpType::Movement(Movement::Shrink)
                     | OpType::Movement(Movement::Stride)
                     | OpType::Movement(Movement::Permute)
             ) || (matches!(optype, OpType::Movement(Movement::Reshape))
-                && matches!(self.lazyop.optype, OpType::Unary(_))))
-            && self.children.is_empty()
-        {
-            return replace_with_movement_ops(
-                &(*self.lazyop.0).clone().into(),
-                &[(self.lazyop.optype.clone(), arg.to_vec())],
-            );
-            // return match optype {
-            //     OpType::Movement(m) => match m {
-            //         Movement::Reshape => self.reshape(arg),
-            //         Movement::Expand => self.expand(arg),
-            //         _ => unreachable!(),
-            //     },
-            //     _ => unreachable!(),
-            // };
+                && matches!(self.lazyop.optype, OpType::Unary(_)))
+            {
+                return replace_with_movement_ops(
+                    &(*self.lazyop.0).clone().into(),
+                    &[(self.lazyop.optype.clone(), arg.to_vec())],
+                );
+            }
         }
+        // if matches!(self.lazyop.optype, OpType::Binary(_))
+        //     && !self.is_realized()
+        //     && (matches!(
+        //         optype,
+        //         OpType::Movement(Movement::Shrink)
+        //             | OpType::Movement(Movement::Stride)
+        //             | OpType::Movement(Movement::Permute)
+        //     && self.children.is_empty()
+        // {
+        //     return replace_with_movement_ops(
+        //         &(*self.lazyop.0).clone().into(),
+        //         &[(self.lazyop.optype.clone(), arg.to_vec())],
+        //     );
+        //     // return match optype {
+        //     //     OpType::Movement(m) => match m {
+        //     //         Movement::Reshape => self.reshape(arg),
+        //     //         Movement::Expand => self.expand(arg),
+        //     //         _ => unreachable!(),
+        //     //     },
+        //     //     _ => unreachable!(),
+        //     // };
+        // }
         assert!(!st.shape().is_empty());
         if !self.is_realized() && st.contiguous() {
             let root = get_movementroot(&*self, false);
@@ -555,11 +574,11 @@ impl LazyBuffer {
                         )
                     }
                     Movement::Expand => {
-                        return self.lazyop.src[0].clone().lb_mut().permute(arg).expand(
+                        return self.lazyop.src[0].lb().permute(arg).expand(
                             &arg.iter()
                                 .map(|i| self.lazyop.args[*i as usize].to_idx())
                                 .collect::<Vec<isize>>(),
-                        )
+                        );
                     }
                     Movement::Reshape if matches!(self.lazyop.src[0], LazyOpSrc::LazyBuffer(_)) => {
                         if let Some(shape_idx_groups) =
@@ -588,8 +607,7 @@ impl LazyBuffer {
                     let mut src = self.lazyop.src[0].clone();
                     let optype = &self.lazyop.optype;
                     src.lb_mut().children.remove(self);
-                    println!(">>>>{:?}", arg);
-                    return src.lb().permute(arg).r(optype.clone(), &narg)
+                    return src.lb().permute(arg).r(optype.clone(), &narg);
                 }
                 t => (),
             };
@@ -665,7 +683,7 @@ pub fn create_lazybuffer(
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
         let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-        println!("{} {:?}", ret.id, ret);
+        //println!("{} {:?}", ret.id, ret);
         return ret;
     }
     // # wop is the deduping key. i feel this used to compare more deeply
@@ -676,7 +694,7 @@ pub fn create_lazybuffer(
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
     let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-    println!("{} {:?}", ret.id, ret);
+    //println!("{} {:?}", ret.id, ret);
     ret
 }
 
@@ -902,7 +920,6 @@ fn _realize_contiguous(buffer: &LazyBuffer) {
 #[rustfmt::skip]
 fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
     let mut rng = rand::thread_rng();
-    println!("wating to alloc rand");
     let ptr = match dtype.type_name {
         "f16" => { let mut ret = (0..size).map(|_| rng.gen::<f16>()).collect::<Vec<f16>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
         "f32" => { let mut ret = (0..size).map(|_| rng.gen::<f32>()).collect::<Vec<f32>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
@@ -917,13 +934,16 @@ fn gen_rand_num_bytes(size: usize, dtype: &Dtype) -> Vec<u8> {
         "i64" => { let mut ret = (0..size).map(|_| rng.gen::<i64>()).collect::<Vec<i64>>(); let ret_ptr = ret.as_mut_ptr() as *mut u8; std::mem::forget(ret); ret_ptr},
         t => panic!("unable gen type t={t}"),
     };
-    println!("finished alloc rand");
     unsafe { Vec::<u8>::from_raw_parts(ptr, size * dtype.size, size * dtype.size)}
 }
 
 pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
     let mut replacements: HashMap<LazyBuffer, LazyOp> = HashMap::new();
-    let mut base_bufs:Vec<LazyBuffer> = v![x.base(), for x in op.buffers.iter(), if !x.is_unrealized_const()].into_iter().unique().collect();
+    let mut base_bufs: Vec<LazyBuffer> =
+        v![x.base(), for x in op.buffers.iter(), if !x.is_unrealized_const()]
+            .into_iter()
+            .unique()
+            .collect();
     for x in op.buffers.iter() {
         let st = x.st.simplify();
         if base_bufs.contains(&x.base()) {
@@ -1022,8 +1042,8 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             .get(&format!("{:?}", si))
             .map(|v| (*v).clone());
         if let Some(kernel) = cached {
-            println!("\ncached hit");
-            println!("{}", kernel.prg);
+            //println!("\ncached hit");
+            //println!("{}", kernel.prg);
             let prg = DEVICE.build(&kernel.name, &kernel.prg);
             unsafe {
                 Arc::get_mut_unchecked(&mut si.out.device_buffer)
@@ -1041,7 +1061,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                 &[],
             );
         } else {
-            println!("\nzero hit");
+            //println!("\nzero hit");
             if si.out.device_buffer.is_none() {
                 _realize_empty(&si.out);
             }
@@ -1051,7 +1071,6 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             );
             let mut lin = DEVICE.get_lin(si.ast.clone());
             lin.linearize();
-            println!("{} {:?}\n{} {:?}", lin.kernel.bufs.len(), lin.kernel.bufs, bufs.len(), bufs);
             let global_size = if let Some(mut gs) = lin.global_size.clone() {
                 gs.extend(vec![1; 3 - gs.len()]);
                 gs
@@ -1075,7 +1094,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                     buffers: v![b.clone(), for b in bufs.iter()],
                 },
             );
-            println!("{prg}");
+            //println!("{prg}");
             let prg = DEVICE.build(&name, &prg);
             prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
         }

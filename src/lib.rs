@@ -21,4 +21,5 @@ pub mod prelude {
     pub use crate::lazy::LazyBuffer;
     pub use crate::macros::*;
     pub use crate::tensor::{Tensor, TensorDefaultType};
+    pub use crate::nn::optim::*;
 }

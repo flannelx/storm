@@ -132,8 +132,14 @@ impl Device for CLDevice {
 
     fn build(&self, name: &str, program: &str) -> Arc<dyn Program> {
         let program =
-            opencl3::program::Program::create_and_build_from_source(&self.context, program, "")
-                .expect("Program::create_and_build_from_source failed");
+            opencl3::program::Program::create_and_build_from_source(&self.context, program, "");
+        // Need to `Display` print, panic will print message in Debug which will escape characters
+        // like new lines `\n`
+        if program.is_err() {
+            println!("{}", program.err().unwrap());
+            panic!("Program::create_and_build_from_source failed");
+        };
+        let program = program.unwrap();
         let kernel = Kernel::create(&program, name).expect("Kernel::create failed");
         Arc::new(CLProgram {
             device: self.clone(),

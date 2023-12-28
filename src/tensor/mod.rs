@@ -78,7 +78,7 @@ impl Tensor {
         }
     }
 
-    pub fn from<T: num_traits::ToBytes, V: Into<Vec<T>>>(data: V) -> Self {
+    pub fn from<V: Into<Vec<TensorDefaultType>>>(data: V) -> Self {
         let data = data.into();
         let buffer = LazyBuffer::from_cpu(data);
         Self {
@@ -331,10 +331,21 @@ impl Tensor {
             .map(|(p0, (p1, s))| (-(*p0 as isize), *s as isize + *p1 as isize))
             .rev()
             .collect();
-        //slc.iter().step_by(step)
-        // println!("slc {:?}", slc);
-        let mut slice_shape: Vec<(isize, isize)> = self.shape().dims
-            [..self.shape().len() - padding.len() / 2]
+        let rl = (self.shape().len() as isize - (padding.len() / 2) as isize);
+        let r = if rl < 0 {
+            if rl < -(self.shape().len() as isize) {
+                0
+            } else {
+                (self.shape().len() as isize + rl) as usize
+            }
+        } else {
+            if rl > self.shape().len() as isize {
+                self.shape().len()
+            } else {
+                rl as usize
+            }
+        };
+        let mut slice_shape: Vec<(isize, isize)> = self.shape().dims[..r as usize]
             .iter()
             .map(|sh| (0, *sh as isize))
             .collect();
@@ -629,23 +640,25 @@ impl Tensor {
         self._max_pool2d(None, None, None)
     }
 
-    pub fn _max_pool2d(&self, kernel_size: Option<usize>, stride: Option<usize>, dilation: Option<usize>) -> Self {
+    pub fn _max_pool2d(
+        &self,
+        kernel_size: Option<usize>,
+        stride: Option<usize>,
+        dilation: Option<usize>,
+    ) -> Self {
         let kernel_size = if kernel_size.is_some() {
             kernel_size.unwrap()
         } else {
             2
         };
-        let stride = if stride.is_some() {
-            stride.unwrap()
-        } else {
-            1
-        };
+        let stride = if stride.is_some() { stride.unwrap() } else { 1 };
         let dilation = if dilation.is_some() {
             dilation.unwrap()
         } else {
             1
         };
-        self._pool([kernel_size, kernel_size], stride, dilation)._max(&v![-(i as isize), for i in (0..2).rev()], false)
+        self._pool([kernel_size, kernel_size], stride, dilation)
+            ._max(&v![-(i as isize), for i in (0..2).rev()], false)
     }
 
 
@@ -788,6 +801,9 @@ impl Tensor {
             .iter()
             .map(|i| *i as usize)
             .collect::<Vec<usize>>();
+      //x = x.reshape(bs, groups, cin, 1, *oyx, *HW)
+      //     .expand(bs, groups, cin, rcout, *oyx, *HW)
+      //     .permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])  # noqa: E501
         x = x.reshape(vec![vec![bs, groups,cin, 1], oyx.clone(), hw.clone()].concat())
              .expand(vec![vec![bs, groups, cin, rcout], oyx.clone(), hw.clone()].concat())
              .permute(vec![vec![0,1,3], v![4+i, for i in 0..oyx.len()], vec![2], v![4+oyx.len()+i, for i in 0..hw.len()]].concat());
@@ -1136,7 +1152,7 @@ impl Tensor {
             need_input_grad: [self.require_grad, y.require_grad, z.require_grad],
             ..Default::default()
         }
-        .apply(&x, Some(&y), Some(&z), None, None)
+        .apply(&x, Some(&x), Some(&y), None, None)
     }
 
     // def mean(self, axis=None, keepdim=False):
@@ -1174,309 +1190,289 @@ impl Tensor {
     }
 }
 
-//TODO: Tests should be in a macro so that each backend can generate test.
+#[test]
+fn sum_axis() {
+    use crate::prelude::*;
+    use num_traits::FromPrimitive;
+    let n = 2 * 3;
+    let t = Tensor::from(
+        (1..n + 1)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([2, 3]);
+    let y = t.sum(1);
+    assert!(vec![6.0f32, 15.0f32] == y.to_vec());
 
-// #[test]
-// fn sum_axis() {
-//     use crate::prelude::*;
-//     let n = 2 * 3;
-//     let t = Tensor::<Cpu>::from_shape(
-//         (1..n + 1)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [2, 3],
-//     );
-//     let y = t.sum(1);
-//     assert!(vec![6.0f32, 15.0f32] == y.to_vec());
-//
-//     let n = 4 * 2 * 3 * 3;
-//     let t = Tensor::<Cpu>::from_shape(
-//         (1..n + 1)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [4, 2, 3, 3],
-//     );
-//
-//     let y = t.sum(0);
-//     assert!(
-//         vec![
-//             112., 116., 120., 124., 128., 132., 136., 140., 144., 148., 152., 156., 160., 164.,
-//             168., 172., 176., 180.
-//         ] == y.to_vec()
-//     );
-//
-//     let y = t.sum(1);
-//     assert!(
-//         vec![
-//             11., 13., 15., 17., 19., 21., 23., 25., 27., 47., 49., 51., 53., 55., 57., 59., 61.,
-//             63., 83., 85., 87., 89., 91., 93., 95., 97., 99., 119., 121., 123., 125., 127., 129.,
-//             131., 133., 135.
-//         ] == y.to_vec()
-//     );
-//
-//     let y = t.sum(2);
-//     assert!(
-//         vec![
-//             12., 15., 18., 39., 42., 45., 66., 69., 72., 93., 96., 99., 120., 123., 126., 147.,
-//             150., 153., 174., 177., 180., 201., 204., 207.
-//         ] == y.to_vec()
-//     );
-//
-//     let y = t.sum(3);
-//     assert!(
-//         vec![
-//             6., 15., 24., 33., 42., 51., 60., 69., 78., 87., 96., 105., 114., 123., 132., 141.,
-//             150., 159., 168., 177., 186., 195., 204., 213.
-//         ] == y.to_vec()
-//     );
-//
-//     let a = Tensor::<Cpu>::from_shape([2., 2., 2.], [3]);
-//     assert!(vec![6.] == a.sum_all().to_vec())
-// }
-//
-// #[test]
-// fn matmul() {
-//     let a = Tensor::<Cpu>::from_shape([1., 2., 3., 4., 5., 6.], [2, 3]);
-//     let b = Tensor::<Cpu>::from_shape([10., 11., 20., 21., 30., 31.], [3, 2]);
-//     let y = a.matmul(&b);
-//     assert!(vec![140., 146., 320., 335.] == y.to_vec());
-//
-//     let a = Tensor::<Cpu>::from_shape(
-//         (1..=4 * 9)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [4, 9],
-//     );
-//     let b = Tensor::<Cpu>::from_shape(
-//         (1..=9 * 2)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [9, 2],
-//     );
-//     let y = a.matmul(&b);
-//     assert!(vec![525., 570., 1254., 1380., 1983., 2190., 2712., 3000.] == y.to_vec())
-// }
-//
-// #[test]
-// fn pool() {
-//     let n = 9;
-//     let a = Tensor::<Cpu>::from_shape(
-//         (1..=n * n)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [n, n],
-//     );
-//     let k = Vec<isize>::from([3, 3]);
-//     let y = a._pool(k, 1, 1);
-//     assert!(
-//         vec![
-//             1., 2., 3., 10., 11., 12., 19., 20., 21., 2., 3., 4., 11., 12., 13., 20., 21., 22., 3.,
-//             4., 5., 12., 13., 14., 21., 22., 23., 4., 5., 6., 13., 14., 15., 22., 23., 24., 5., 6.,
-//             7., 14., 15., 16., 23., 24., 25., 6., 7., 8., 15., 16., 17., 24., 25., 26., 7., 8., 9.,
-//             16., 17., 18., 25., 26., 27., 10., 11., 12., 19., 20., 21., 28., 29., 30., 11., 12.,
-//             13., 20., 21., 22., 29., 30., 31., 12., 13., 14., 21., 22., 23., 30., 31., 32., 13.,
-//             14., 15., 22., 23., 24., 31., 32., 33., 14., 15., 16., 23., 24., 25., 32., 33., 34.,
-//             15., 16., 17., 24., 25., 26., 33., 34., 35., 16., 17., 18., 25., 26., 27., 34., 35.,
-//             36., 19., 20., 21., 28., 29., 30., 37., 38., 39., 20., 21., 22., 29., 30., 31., 38.,
-//             39., 40., 21., 22., 23., 30., 31., 32., 39., 40., 41., 22., 23., 24., 31., 32., 33.,
-//             40., 41., 42., 23., 24., 25., 32., 33., 34., 41., 42., 43., 24., 25., 26., 33., 34.,
-//             35., 42., 43., 44., 25., 26., 27., 34., 35., 36., 43., 44., 45., 28., 29., 30., 37.,
-//             38., 39., 46., 47., 48., 29., 30., 31., 38., 39., 40., 47., 48., 49., 30., 31., 32.,
-//             39., 40., 41., 48., 49., 50., 31., 32., 33., 40., 41., 42., 49., 50., 51., 32., 33.,
-//             34., 41., 42., 43., 50., 51., 52., 33., 34., 35., 42., 43., 44., 51., 52., 53., 34.,
-//             35., 36., 43., 44., 45., 52., 53., 54., 37., 38., 39., 46., 47., 48., 55., 56., 57.,
-//             38., 39., 40., 47., 48., 49., 56., 57., 58., 39., 40., 41., 48., 49., 50., 57., 58.,
-//             59., 40., 41., 42., 49., 50., 51., 58., 59., 60., 41., 42., 43., 50., 51., 52., 59.,
-//             60., 61., 42., 43., 44., 51., 52., 53., 60., 61., 62., 43., 44., 45., 52., 53., 54.,
-//             61., 62., 63., 46., 47., 48., 55., 56., 57., 64., 65., 66., 47., 48., 49., 56., 57.,
-//             58., 65., 66., 67., 48., 49., 50., 57., 58., 59., 66., 67., 68., 49., 50., 51., 58.,
-//             59., 60., 67., 68., 69., 50., 51., 52., 59., 60., 61., 68., 69., 70., 51., 52., 53.,
-//             60., 61., 62., 69., 70., 71., 52., 53., 54., 61., 62., 63., 70., 71., 72., 55., 56.,
-//             57., 64., 65., 66., 73., 74., 75., 56., 57., 58., 65., 66., 67., 74., 75., 76., 57.,
-//             58., 59., 66., 67., 68., 75., 76., 77., 58., 59., 60., 67., 68., 69., 76., 77., 78.,
-//             59., 60., 61., 68., 69., 70., 77., 78., 79., 60., 61., 62., 69., 70., 71., 78., 79.,
-//             80., 61., 62., 63., 70., 71., 72., 79., 80., 81.
-//         ] == y.to_vec(),
-//         "{y}"
-//     );
-// }
-//
-// #[test]
-// fn conv2d() {
-//     let a = Tensor::<Cpu>::from_shape(
-//         (1..=9 * 9)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [1, 1, 9, 9],
-//     );
-//     let k = Tensor::<Cpu>::from_shape(
-//         (1..=3 * 3)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [1, 1, 3, 3],
-//     );
-//     let r = a.conv2d(&k);
-//     assert!(
-//         vec![
-//             663., 708., 753., 798., 843., 888., 933., 1068., 1113., 1158., 1203., 1248., 1293.,
-//             1338., 1473., 1518., 1563., 1608., 1653., 1698., 1743., 1878., 1923., 1968., 2013.,
-//             2058., 2103., 2148., 2283., 2328., 2373., 2418., 2463., 2508., 2553., 2688., 2733.,
-//             2778., 2823., 2868., 2913., 2958., 3093., 3138., 3183., 3228., 3273., 3318., 3363.
-//         ] == r.to_vec()
-//     );
-//
-//     let (cin, cout, conv) = (3, 3, 3);
-//
-//     let a2 = Tensor::<Cpu>::from_shape(
-//         (1..=cin * 6 * 6)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [cin, 1, 6, 6],
-//     );
-//     let k2 = Tensor::<Cpu>::from_shape(
-//         (1..=cin * conv * conv)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [cin, 1, conv, conv],
-//     );
-//     let k3 = Tensor::<Cpu>::from_shape(
-//         (1..=cout * cin * conv * conv)
-//             .map(|e| f32::from_usize(e).unwrap())
-//             .collect::<Vec<f32>>(),
-//         [cout, cin, conv, conv],
-//     );
-//     let r = a2.conv2d(&k2).conv2d(&k3);
-//
-//     assert!(
-//         vec![
-//             997434., 1058184., 1361934., 1422684., 2458350., 2610954., 3373974., 3526578.,
-//             3919266., 4163724., 5386014., 5630472., 3184434., 3245184., 3548934., 3609684.,
-//             7952094., 8104698., 8867718., 9020322., 12719754., 12964212., 14186502., 14430960.,
-//             5371434., 5432184., 5735934., 5796684., 13445838., 13598442., 14361462., 14514066.,
-//             21520242., 21764700., 22986990., 23231448.
-//         ] == r.to_vec(),
-//         "{r}"
-//     );
-// }
-//
-// // macro_rules! close_to_literal {
-// //     ($x:tt, $y:tt) => {
-// //         x.iter().zip(y.iter()).any(|(x, y)| x / yfm)
-// //     };
-// // }
-//
-// #[test]
-// fn sparse_categorical_crossentropy() {
-//     let y = Tensor::<Cpu>::from_shape([1.0, 2.0], [2]);
-//     let out = Tensor::<Cpu>::from_shape([0.05, 0.95, 0., 0.1, 0.8, 0.1], [6]);
-//     let loss = out.sparse_categorical_crossentropy(&y);
-//     approx_eq!(loss, [1.7302881]);
-//     let y = Tensor::<Cpu>::from_shape([-0.0, -0.0, -1., -0.1, -0.2, -0.3], [6]);
-//     let out = Tensor::<Cpu>::from_shape([-0.05, -0.95, -0., -0.1, -0.8, -0.1], [6]);
-//     let loss = out.sparse_categorical_crossentropy(&y);
-//     approx_eq!(loss, [0.6301593]);
-// }
-//
-// #[test]
-// fn lt() {
-//     let x = Tensor::<Cpu>::from_shape([1., 2., 3., 4., 5.], [5]);
-//     let y = Tensor::<Cpu>::from_shape([0., 2., 0., 4., 0.], [5]);
-//     let o = x._lt(&y);
-//     approx_eq!(o, [0., 0., 0., 0., 0.]);
-//     let x = Tensor::<Cpu>::from_shape([1., 0., 3., 0., 5.], [5]);
-//     let y = Tensor::<Cpu>::from_shape([0., 2., 0., 4., 0.], [5]);
-//     let o = x._lt(&y);
-//     approx_eq!(o, [0., 1., 0., 1., 0.]);
-// }
-//
-// #[test]
-// fn eq() {
-//     let x = Tensor::<Cpu>::from_shape([1., 2., 3., 4., 5.], [5]);
-//     let y = Tensor::<Cpu>::from_shape([0., 2., 0., 4., 0.], [5]);
-//     let o = x._eq(&y);
-//     approx_eq!(o, [0., 1., 0., 1., 0.]);
-// }
-//
-// #[test]
-// fn where_test() {
-//     let x = Tensor::<Cpu>::from_shape([1., 2., 3., 4., 5.], [5]);
-//     let y = Tensor::<Cpu>::from_shape([0., 2., 0., 4., 0.], [5]);
-//     let out = x._eq(&y)._where(1.0, 2.0);
-//     approx_eq!(out, [2., 1., 2., 1., 2.]);
-// }
-//
-// #[test]
-// fn test_softmax() {
-//     let x = Tensor::<Cpu>::from_shape([1., 2., 3.], [3]);
-//     let (m, e, ss) = x._softmax(-1);
-//     approx_eq!(m, [-2., -1., 0.,]);
-//     approx_eq!(e, [0.13533531, 0.36787948, 1.,]);
-//     approx_eq!(ss, [1.5032148]);
-// }
-//
-// #[test]
-// fn max_test() {
-//     let x = Tensor::<Cpu>::from_shape(
-//         (1..=3 * 3 * 3)
-//             .into_iter()
-//             .map(|e| e as f32)
-//             .collect::<Vec<f32>>(),
-//         [3 * 3 * 3],
-//     )
-//     .reshape([3, 3, 3]);
-//     let y = (x * -1.0f32).max_all();
-//     approx_eq!(y, [-1.0]);
+    let n = 4 * 2 * 3 * 3;
+    let t = Tensor::from(
+        (1..n + 1)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([4, 2, 3, 3]);
+
+    let y = t.sum(0);
+    assert!(
+        vec![
+            112., 116., 120., 124., 128., 132., 136., 140., 144., 148., 152., 156., 160., 164.,
+            168., 172., 176., 180.
+        ] == y.to_vec()
+    );
+
+    let y = t.sum(1);
+    assert!(
+        vec![
+            11., 13., 15., 17., 19., 21., 23., 25., 27., 47., 49., 51., 53., 55., 57., 59., 61.,
+            63., 83., 85., 87., 89., 91., 93., 95., 97., 99., 119., 121., 123., 125., 127., 129.,
+            131., 133., 135.
+        ] == y.to_vec()
+    );
+
+    let y = t.sum(2);
+    assert!(
+        vec![
+            12., 15., 18., 39., 42., 45., 66., 69., 72., 93., 96., 99., 120., 123., 126., 147.,
+            150., 153., 174., 177., 180., 201., 204., 207.
+        ] == y.to_vec()
+    );
+
+    let y = t.sum(3);
+    assert!(
+        vec![
+            6., 15., 24., 33., 42., 51., 60., 69., 78., 87., 96., 105., 114., 123., 132., 141.,
+            150., 159., 168., 177., 186., 195., 204., 213.
+        ] == y.to_vec()
+    );
+
+    let a = Tensor::from([2., 2., 2.]);
+    assert!(vec![6.] == a.sum_all().to_vec())
+}
+
+#[test]
+fn matmul() {
+    use num_traits::FromPrimitive;
+    let a = Tensor::from([1f32, 2., 3., 4., 5., 6.]).reshape([2, 3]);
+    let b = Tensor::from([10f32, 11., 20., 21., 30., 31.]).reshape([3, 2]);
+    let y = a.matmul(&b);
+    assert!(vec![140f32, 146., 320., 335.] == y.to_vec());
+
+    let a = Tensor::from(
+        (1..=4 * 9)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([4, 9]);
+    let b = Tensor::from(
+        (1..=9 * 2)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([9, 2]);
+    let y = a.matmul(&b).to_vec();
+    assert!(
+        vec![525., 570., 1254., 1380., 1983., 2190., 2712., 3000.] == y,
+        "{y:?}"
+    )
+}
+
+#[test]
+fn pool() {
+    use num_traits::FromPrimitive;
+    let n = 9;
+    let a = Tensor::from(
+        (1..=n * n)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([n, n]);
+    let k = Vec::from([3, 3]);
+    let y = (a._pool(k, 1, 1) * 1).to_vec();
+    assert!(
+        vec![
+            1., 2., 3., 10., 11., 12., 19., 20., 21., 2., 3., 4., 11., 12., 13., 20., 21., 22., 3.,
+            4., 5., 12., 13., 14., 21., 22., 23., 4., 5., 6., 13., 14., 15., 22., 23., 24., 5., 6.,
+            7., 14., 15., 16., 23., 24., 25., 6., 7., 8., 15., 16., 17., 24., 25., 26., 7., 8., 9.,
+            16., 17., 18., 25., 26., 27., 10., 11., 12., 19., 20., 21., 28., 29., 30., 11., 12.,
+            13., 20., 21., 22., 29., 30., 31., 12., 13., 14., 21., 22., 23., 30., 31., 32., 13.,
+            14., 15., 22., 23., 24., 31., 32., 33., 14., 15., 16., 23., 24., 25., 32., 33., 34.,
+            15., 16., 17., 24., 25., 26., 33., 34., 35., 16., 17., 18., 25., 26., 27., 34., 35.,
+            36., 19., 20., 21., 28., 29., 30., 37., 38., 39., 20., 21., 22., 29., 30., 31., 38.,
+            39., 40., 21., 22., 23., 30., 31., 32., 39., 40., 41., 22., 23., 24., 31., 32., 33.,
+            40., 41., 42., 23., 24., 25., 32., 33., 34., 41., 42., 43., 24., 25., 26., 33., 34.,
+            35., 42., 43., 44., 25., 26., 27., 34., 35., 36., 43., 44., 45., 28., 29., 30., 37.,
+            38., 39., 46., 47., 48., 29., 30., 31., 38., 39., 40., 47., 48., 49., 30., 31., 32.,
+            39., 40., 41., 48., 49., 50., 31., 32., 33., 40., 41., 42., 49., 50., 51., 32., 33.,
+            34., 41., 42., 43., 50., 51., 52., 33., 34., 35., 42., 43., 44., 51., 52., 53., 34.,
+            35., 36., 43., 44., 45., 52., 53., 54., 37., 38., 39., 46., 47., 48., 55., 56., 57.,
+            38., 39., 40., 47., 48., 49., 56., 57., 58., 39., 40., 41., 48., 49., 50., 57., 58.,
+            59., 40., 41., 42., 49., 50., 51., 58., 59., 60., 41., 42., 43., 50., 51., 52., 59.,
+            60., 61., 42., 43., 44., 51., 52., 53., 60., 61., 62., 43., 44., 45., 52., 53., 54.,
+            61., 62., 63., 46., 47., 48., 55., 56., 57., 64., 65., 66., 47., 48., 49., 56., 57.,
+            58., 65., 66., 67., 48., 49., 50., 57., 58., 59., 66., 67., 68., 49., 50., 51., 58.,
+            59., 60., 67., 68., 69., 50., 51., 52., 59., 60., 61., 68., 69., 70., 51., 52., 53.,
+            60., 61., 62., 69., 70., 71., 52., 53., 54., 61., 62., 63., 70., 71., 72., 55., 56.,
+            57., 64., 65., 66., 73., 74., 75., 56., 57., 58., 65., 66., 67., 74., 75., 76., 57.,
+            58., 59., 66., 67., 68., 75., 76., 77., 58., 59., 60., 67., 68., 69., 76., 77., 78.,
+            59., 60., 61., 68., 69., 70., 77., 78., 79., 60., 61., 62., 69., 70., 71., 78., 79.,
+            80., 61., 62., 63., 70., 71., 72., 79., 80., 81.
+        ] == y,
+        "{y:?}"
+    );
+}
+
+#[test]
+fn conv2d() {
+    use num_traits::FromPrimitive;
+    let a = Tensor::from(
+        (1..=9 * 9)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([1, 1, 9, 9]);
+    let k = Tensor::from(
+        (1..=3 * 3)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([1, 1, 3, 3]);
+    let r = a.conv2d(&k).to_vec();
+    assert!(
+        vec![
+            663., 708., 753., 798., 843., 888., 933., 1068., 1113., 1158., 1203., 1248., 1293.,
+            1338., 1473., 1518., 1563., 1608., 1653., 1698., 1743., 1878., 1923., 1968., 2013.,
+            2058., 2103., 2148., 2283., 2328., 2373., 2418., 2463., 2508., 2553., 2688., 2733.,
+            2778., 2823., 2868., 2913., 2958., 3093., 3138., 3183., 3228., 3273., 3318., 3363.
+        ] == r,
+        "{r:?}"
+    );
+
+    let (cin, cout, conv) = (3, 3, 3);
+
+    let a2 = Tensor::from(
+        (1..=cin * 6 * 6)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([cin, 1, 6, 6]);
+    let k2 = Tensor::from(
+        (1..=cin * conv * conv)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([cin, 1, conv, conv]);
+    let k3 = Tensor::from(
+        (1..=cout * cin * conv * conv)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([cout, cin, conv, conv]);
+    let r = a2.conv2d(&k2).conv2d(&k3).to_vec();
+
+    assert!(
+        vec![
+            997434., 1058184., 1361934., 1422684., 2458350., 2610954., 3373974., 3526578.,
+            3919266., 4163724., 5386014., 5630472., 3184434., 3245184., 3548934., 3609684.,
+            7952094., 8104698., 8867718., 9020322., 12719754., 12964212., 14186502., 14430960.,
+            5371434., 5432184., 5735934., 5796684., 13445838., 13598442., 14361462., 14514066.,
+            21520242., 21764700., 22986990., 23231448.
+        ] == r,
+        "{r:?}"
+    );
+}
+
+// macro_rules! close_to_literal {
+//     ($x:tt, $y:tt) => {
+//         x.iter().zip(y.iter()).any(|(x, y)| x / yfm)
+//     };
 // }
 
-// #[test]
-// fn xor() {
-//     struct Xornet {
-//         l1: Tensor<Cpu>,
-//         l2: Tensor<Cpu>,
-//     }
-//     impl Xornet {
-//         pub fn new() -> Self {
-//             Self {
-//                 l1: Tensor::<Cpu>::scaled_uniform([2, 10]),
-//                 l2: Tensor::<Cpu>::scaled_uniform([10, 1]),
-//             }
-//         }
-//         pub fn forward(&mut self, x: &Tensor<Cpu>) -> Tensor<Cpu> {
-//             let mut x = x.matmul(&self.l1).sigmoid();
-//             x = x.matmul(&self.l2);
-//             x
-//         }
-//     }
-//
-//     // loss = (y - out).abs().sum() / y.numel()
-//     let mut model = Xornet::new();
-//     let mut optim = adam(vec![&mut model.l1, &mut model.l2], 0.1);
-//     let x = Tensor::<Cpu>::from_vec([0., 0., 0., 1., 1., 0., 1., 1.], [4, 2]);
-//     let y = Tensor::<Cpu>::from_vec([0., 1., 1., 0.], [1, 4]);
-//     for _ in 0..100 {
-//         let out = model.forward(&x);
-//         //let mut loss = (&out - &y).abs().sum_all() / y.numel();
-//         let mut loss = &out - &y;
-//         loss = (&loss * &loss).mean();
-//         optim.zero_grad();
-//         println!("loss {:?}", loss.to_vec());
-//         loss.backward();
-//         optim.step();
-//     }
-//
-//     // let t = Tensor::<Cpu>::from_vec([0., 0.], [2]);
-//     // let y = Tensor::<Cpu>::from_vec([0.], [1]);
-//     // //println!("Expected: 0 | Got: {}", model.forward(&t).to_vec()[0]);
-//     //
-//     // let t = Tensor::<Cpu>::from_vec([1., 0.], [2]);
-//     // let y = Tensor::<Cpu>::from_vec([1.], [1]);
-//     // //println!("Expected: 1 | Got: {}", model.forward(&t).to_vec()[0]);
-//     //
-//     // let t = Tensor::<Cpu>::from_vec([0., 1.], [2]);
-//     // let y = Tensor::<Cpu>::from_vec([1.], [1]);
-//     // //println!("Expected: 1 | Got: {}", model.forward(&t).to_vec()[0]);
-//     //
-//     // let t = Tensor::<Cpu>::from_vec([1., 1.], [2]);
-//     // let y = Tensor::<Cpu>::from_vec([0.], [1]);
-//     //println!("Expected: 0 | Got: {}", model.forward(&t).to_vec()[0]);
-// }
+#[test]
+fn sparse_categorical_crossentropy() {
+    let y = Tensor::from([1.0, 2.0]).reshape([2]);
+    let out = Tensor::from([0.05, 0.95, 0., 0.1, 0.8, 0.1]).reshape([6]);
+    let loss = out.sparse_categorical_crossentropy(&y);
+    approx_eq!(loss, [1.7302881]);
+    let y = Tensor::from([-0.0, -0.0, -1., -0.1, -0.2, -0.3]).reshape([6]);
+    let out = Tensor::from([-0.05, -0.95, -0., -0.1, -0.8, -0.1]).reshape([6]);
+    let loss = out.sparse_categorical_crossentropy(&y);
+    approx_eq!(loss, [0.6301593]);
+}
+
+#[test]
+fn lt() {
+    let x = Tensor::from([1., 2., 3., 4., 5.]);
+    let y = Tensor::from([0., 2., 0., 4., 0.]);
+    let o = x._lt(&y);
+    approx_eq!(o, [0., 0., 0., 0., 0.]);
+    let x = Tensor::from([1., 0., 3., 0., 5.]);
+    let y = Tensor::from([0., 2., 0., 4., 0.]);
+    let o = x._lt(&y);
+    approx_eq!(o, [0., 1., 0., 1., 0.]);
+}
+
+#[test]
+fn eq() {
+    let x = Tensor::from([1., 2., 3., 4., 5.]);
+    let y = Tensor::from([0., 2., 0., 4., 0.]);
+    let o = x._eq(&y);
+    approx_eq!(o, [0., 1., 0., 1., 0.]);
+}
+
+#[test]
+fn where_test() {
+    let x = Tensor::from([1., 2., 3., 4., 5.]);
+    let y = Tensor::from([0., 2., 0., 4., 0.]);
+    let out = x._eq(&y)._where(1.0, 2.0);
+    approx_eq!(out, [2., 1., 2., 1., 2.]);
+}
+
+#[test]
+fn test_softmax() {
+    let x = Tensor::from([1., 2., 3.]);
+    let (m, e, ss) = x._softmax(-1);
+    approx_eq!(m, [-2., -1., 0.,]);
+    approx_eq!(e, [0.13533531, 0.36787948, 1.,]);
+    approx_eq!(ss, [1.5032148]);
+}
+
+#[test]
+fn max_test() {
+    let x = Tensor::from(
+        (1..=3 * 3 * 3)
+            .into_iter()
+            .map(|e| e as f32)
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([3 * 3 * 3])
+    .reshape([3, 3, 3]);
+    let y = (x * -1.0f32).max_all().to_vec();
+    assert_eq!(y, [-1.0]);
+}
+
+#[test]
+fn pad2d() {
+    use num_traits::FromPrimitive;
+    let a = Tensor::from(
+        (1..=9 * 9)
+            .map(|e| f32::from_usize(e).unwrap())
+            .collect::<Vec<f32>>(),
+    )
+    .reshape([1, 1, 9, 9]);
+    //let y = (a.pad2d([0, 4, 0, 4], 0) * 1.0).realize();
+    let y = (a.pad2d([0, 4, 0, 4], 0) * 1.0).to_vec();
+    approx_eq!(
+        y,
+        [
+            1., 2., 3., 4., 5., 6., 7., 8., 9., 0., 0., 0., 0., 10., 11., 12., 13., 14., 15., 16.,
+            17., 18., 0., 0., 0., 0., 19., 20., 21., 22., 23., 24., 25., 26., 27., 0., 0., 0., 0.,
+            28., 29., 30., 31., 32., 33., 34., 35., 36., 0., 0., 0., 0., 37., 38., 39., 40., 41.,
+            42., 43., 44., 45., 0., 0., 0., 0., 46., 47., 48., 49., 50., 51., 52., 53., 54., 0.,
+            0., 0., 0., 55., 56., 57., 58., 59., 60., 61., 62., 63., 0., 0., 0., 0., 64., 65., 66.,
+            67., 68., 69., 70., 71., 72., 0., 0., 0., 0., 73., 74., 75., 76., 77., 78., 79., 80.,
+            81., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+            0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+            0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.
+        ]
+    )
+}

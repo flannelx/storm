@@ -138,12 +138,13 @@ fn train<Optim: Optimizer>(
     for i in 0..epoch {
         let x = Tensor::from(&*img_batched[i]).reshape([batch_size, 1, 28, 28]);
         let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
-        let out = model.forward(&x);
-        let mut loss = (out - y).mean();
+        let mut out = model.forward(&x).mean();
+        out.backward();
+        //let mut loss = (out - y).mean();
         //loss.realize();
         //println!("out {:?}",out.to_vec());
         //loss.backward();
-        loss.realize();
+        //loss.realize();
         // optim.step();
         // let pred = out.detach().argmax(-1);
         // let accuracy = (pred._eq(&y.detach())).mean();

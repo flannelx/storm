@@ -338,9 +338,8 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
         let (uop, dtype, vin, args) = (&u.uop, &u.dtype, &u.vin, u.args.clone());
         match uop {
             UOps::LOOP => {
-                *r.get_mut(&u).unwrap() = ssa(u, "ridx", &mut c, &mut r);
                 kk(
-                    &lang.render_for(&r[&u], &r[&vin[0]], &r[&vin[1]]),
+                    &lang.render_for(&ssa(u, "ridx", &mut c, &mut r), &r[&vin[0]], &r[&vin[1]]),
                     &mut kernel,
                     depth,
                 );
@@ -371,7 +370,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                         || args[0] == OpType::Binary(Binary::Sub)
                         || args[0] == OpType::Binary(Binary::Mul))
                 {
-                    let a = r[&vin[0]].clone().replace("(", "").replace(")", "");
+                    let a = strip_parens(&r[&vin[0]]);
                     val = match &args[0] {
                         Arg::OpType(op) => lang.call(
                             &op,
@@ -386,7 +385,11 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                             lang.call(&op, v![r[&x].clone(), for x in vin.iter()], None)
                         }
                         _ => unreachable!(),
-                    }
+                    };
+                    // if args[0] == OpType::Binary(Binary::Cmplt) {
+                    //     val = format!("(float){val}");
+                    // }
+                    //println!(">>{val} {:?}", args[0]);
                 }
                 assert!(child_count[&u] != 0);
                 if child_count[&u] <= 1 || dtype.is_int() {
@@ -500,7 +503,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                     dtype.as_ref().unwrap().clone(),
                     &r[&vin[0]],
                     vin[0].dtype.as_ref().unwrap().clone(),
-                    &r[&vin[1]].replace("(", "").replace(")", ""),
+                    &strip_parens(&r[&vin[1]]),
                     matches!(vin[0].uop, UOps::DEFINE_LOCAL),
                 );
                 if vin.len() > 2 {
@@ -555,7 +558,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                         vin[0].dtype.as_ref().unwrap().clone(),
                         &r[&vin[2]],
                         vin[2].dtype.as_ref().unwrap().clone(),
-                        &r[&vin[1]].replace("(", "").replace(")", ""),
+                        &strip_parens(&r[&vin[1]]),
                         matches!(vin[0].uop, UOps::DEFINE_LOCAL),
                     ),
                     &mut kernel,
@@ -644,4 +647,23 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
         }
     }
     lang.render_kernel(function_name, &kernel, &bufs, &local_size, &prekernel)
+}
+
+fn strip_parens(_s: &str) -> String {
+    let s = _s.chars().into_iter().collect::<Vec<char>>();
+    if s.first() == Some(&'(')
+        && s.last() == Some(&')')
+        && s[1..s.len() - 1]
+            .iter()
+            .position(|&s| s == '(')
+            .is_some_and(|x| {
+                s[1..s.len() - 1]
+                    .iter()
+                    .position(|&s2| s2 == ')')
+                    .is_some_and(|y| x <= y)
+            })
+    {
+        return s[1..s.len() - 1].iter().collect();
+    }
+    _s.to_string()
 }

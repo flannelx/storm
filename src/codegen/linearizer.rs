@@ -17,6 +17,22 @@ use crate::{dtype, lazy::LazyBuffer, ops::OpType};
 
 use super::kernel::{ConstNum, Kernel};
 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
+pub struct UOsId(pub(crate) usize);
+
+pub(crate) fn uop_id() -> UOsId {
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    UOsId(COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+unsafe impl Send for UOsId {}
+unsafe impl Sync for UOsId {}
+
+impl core::fmt::Display for UOsId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UOps {
@@ -44,6 +60,7 @@ pub struct UOp {
     pub(crate) dtype: Option<dtype::Dtype>,
     pub(crate) vin: Vec<UOp>,
     pub(crate) args: Vec<Arg>,
+    pub(crate) id: UOsId,
 }
 
 // impl core::fmt::Display for UOp {
@@ -592,7 +609,6 @@ impl Linearizer {
         mut insert_before: Option<isize>,
         mut simplify: bool,
     ) -> UOp {
-        //println!("trying to insert uop {:?} {:?} {:?}", uop, if vin.len() > 0 { Some(&vin[0].uop) } else { None }, arg.first());
         match uop {
             UOps::ALU => {
                 //assert!(dtype.as_ref().unwrap() == &_bool);
@@ -692,6 +708,7 @@ impl Linearizer {
             dtype: dtype.clone(),
             vin: vin.clone(),
             args: arg.clone(),
+            id: uop_id(),
         };
         let key = &(uop, dtype, vin, arg);
         let insert_before = if insert_before.is_some() {
@@ -725,6 +742,7 @@ impl Linearizer {
         mut barrier: Option<UOp>,
     ) -> Vec<UOp> {
         let buf = &self.kernel.bufs[i];
+        let buf_string = format!("{:?}", buf);
         let localtype = buf.dtype();
         let const_ = if let Buffers::ConstBuffer(acc) = buf {
             if localtype.is_int() {
@@ -770,10 +788,10 @@ impl Linearizer {
         } else {
             self.kernel.sts[i].expr_idxs(Some(fake_idxs.clone()))
         };
-        //println!("{}", g_idx.render_default());
-        if amt > 1 {
-            //TODO: localtype.vectorize()
-        }
+        //if g_idx.render_default() == "gidx0[0-4]" { panic!() };
+        // if amt > 1 {
+        //     //TODO: localtype.vectorize()
+        // }
         let (e_idxs, e_valids) = (
             g_idx.expand(Some(expand_vars.clone())),
             g_valid.expand(Some(expand_vars.clone())),
@@ -793,9 +811,10 @@ impl Linearizer {
                 (const_.clone(), idx.clone(), valid.clone())
             };
             let key = format!(
-                "{:?}{localtype}{:?}{}{}",
+                "{:?}{localtype}{:?}{:?}{}{}",
                 acc.as_ref(),
                 this_const,
+                buf_string,
                 idx.render_default(),
                 valid.render_default()
             );
@@ -837,16 +856,23 @@ impl Linearizer {
                     // valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
                     // panic!("{:?}", idx.render_default());
                     let rendered_idx = self.render(idx);
+
+          //valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
+                    let valid_tuple = if valid.min().unwrap() == 0 {
+                        vec![self.render(valid), self._const(invalid_value.as_ref().unwrap().to_string(), localtype.clone(), None)]
+                    } else {
+                        vec![]
+                    };
                     //panic!();
-                    let mut vin = vec![buf_uop, rendered_idx];
+                    let mut vin = vec![vec![buf_uop, rendered_idx], valid_tuple];
                     if let Some(bb) = barrier.take() {
-                        vin.push(bb)
+                        vin.push(vec![bb])
                     }
                     let tmp = self.uop_default(
                         UOps::LOAD,
                         Some(localtype.clone()),
-                        vin,
-                        vec![Arg::OpType(OpType::Ternary(Ternary::Where))],
+                        vin.concat(),
+                        vec![]
                     );
                     self.load_cache.insert(key.clone(), tmp);
                 }
@@ -1214,7 +1240,7 @@ impl Linearizer {
     }
 
     pub fn render(&mut self, node: ArcNode) -> UOp {
-        return match format!("{:?}", node.0).split(" ").next().unwrap() {
+        let ret =  match format!("{:?}", node.0).split(" ").next().unwrap() {
             "MulNode" => {
                 let a = self.render(node.a().unwrap());
                 self.uop_alu_idx(a, node.b().unwrap(), OpType::Binary(Binary::Mul), None)
@@ -1252,6 +1278,7 @@ impl Linearizer {
             }
             t => panic!("you forgot this {t}"),
         };
+        return ret;
     }
 }
 

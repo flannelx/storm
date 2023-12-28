@@ -214,7 +214,7 @@ pub trait Node: core::fmt::Debug {
     fn render(&self, ops: Arc<dyn NodeOp>, ctx: Option<&str>, strip_paren: bool) -> String;
 
     fn render_default(&self) -> String {
-        self.render(CStyle::new(), Some("DEBUG"), false)
+        self.render(CStyle::new(), None, false)
     }
 
     fn vars(&self) -> Vec<ArcNode> {
@@ -250,7 +250,7 @@ pub trait Node: core::fmt::Debug {
     }
 
     fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
-        todo!();
+        todo!("{:?}",self);
     }
 }
 
@@ -964,6 +964,10 @@ impl LtNode {
 
 #[allow(unused_variables)]
 impl Node for LtNode {
+    fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
+        self.a.substitute(var_vars).lt(if self.b.is_num() { self.b.clone() } else { self.b.substitute(var_vars) })
+    }
+
     fn _mul(&self, rhs: ArcNode) -> ArcNode {
         (self.a.clone() * rhs.clone()).lt(self.b.clone() * rhs.clone())
     }
@@ -1153,11 +1157,7 @@ impl Node for AndNode {
         let mut subed = vec![];
         let sarc = self.to_arc();
         for node in self.nodes() {
-            if let Some(sub) = var_vars.get(&sarc) {
-                subed.push(sub.clone())
-            } else {
-                return num(0);
-            }
+            subed.push(node.substitute(var_vars));
         }
         ands(&subed)
     }
