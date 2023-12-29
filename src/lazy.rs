@@ -106,22 +106,12 @@ impl std::hash::Hash for LazyBuffer {
     }
 }
 
-// impl core::fmt::Debug for LazyBuffer {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(
-//             f,
-//             "<LB id={:?} dtype={:?} op={:?} st={:?} device_buffer={:?}>",
-//             self.id.0, self.dtype.type_name, self.lazyop.optype, self.st.views, self.device_buffer
-//         )
-//     }
-// }
-//
 impl core::fmt::Debug for LazyBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<LB {:?} dtype={:?} op={:?} st={:?}>",
-            self.shape, self.dtype.type_name, self.lazyop.optype, self.st.views
+            "<LB:{} {:?} dtype={:?} op={:?} st={:?}>",
+            self.id.0, self.shape, self.dtype.type_name, self.lazyop.optype, self.st.views
         )
     }
 }
