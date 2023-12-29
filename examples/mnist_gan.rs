@@ -21,8 +21,8 @@ pub fn main() {
         //     println!("couldn't find discriminator safetensor, ignoring...")
         // };
         let out_noise = Tensor::randn([16, 128]);
-        let (epochs, batch_size, k) = (300, 512, 1);
-        let n_steps = 1;
+        let (epochs, batch_size, k) = (300, 50, 2);
+        let n_steps = 30;
         let (train_img, _, _, _) = fetch_mnist_shuffled(batch_size);
         let mut gen_optim =
             adam_with(&[&mut generator.l1, &mut generator.l2], &[0.0002, 0.5]);

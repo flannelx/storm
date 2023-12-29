@@ -15,5 +15,6 @@ fn main() {
 
 
     let a = Tensor::arange(10.);
+    println!("{:?}", a.buffer.st);
     println!("{:?}", a.to_vec());
 }

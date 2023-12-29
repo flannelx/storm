@@ -36,7 +36,7 @@ pub struct LAMP {
     pub(crate) eps: f32,
     pub(crate) wd: f32,
     pub(crate) adam: bool,
-    pub(crate) t: f32,
+    pub(crate) t: Tensor,
     pub(crate) m: Vec<Tensor>,
     pub(crate) v: Vec<Tensor>,
 }
@@ -63,7 +63,7 @@ impl LAMP {
                 (*t).require_grad = true;
                 params.push(t);
             }
-            let lr = Tensor::_const(lr);
+            let lr = Tensor::from([lr]);
             params.dedup_by_key(|t| (*(*t)).id);
             //buffers.dedup_by_key(|t| (*(*t)).id);
             let m = params
@@ -83,7 +83,7 @@ impl LAMP {
                 eps,
                 wd,
                 adam,
-                t: 0.,
+                t: Tensor::from([0.]),
                 m,
                 v,
             }
@@ -123,7 +123,7 @@ impl Optimizer for LAMP {
     }
 
     fn step(&mut self) {
-        self.t += 1.;
+        self.t.assign((&self.t + 1.).realize());
         unsafe {
             for (i, t) in self.params.iter_mut().enumerate() {
                 let t = &mut (**t);
@@ -138,13 +138,12 @@ impl Optimizer for LAMP {
                 self.m[i].assign(mi);
                 self.v[i].assign(vi);
                 // m_hat = self.m[i] / (1.0 - self.b1**self.t)
-                let m_hat = (&self.m[i] / (1.0 - self.b1.powf(self.t)));
+                let m_hat = (&self.m[i] / &(1.0 - self.t.pow(self.b1, true)));
                 // v_hat = self.v[i] / (1.0 - self.b2**self.t)
-                let v_hat = &self.v[i] / (1.0 - self.b2.powf(self.t));
+                let v_hat = &self.v[i] / &(1.0 - self.t.pow(self.b2, true));
                 // up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
                 let up = (m_hat / (v_hat.sqrt() + self.eps)) + t.detach() * self.wd;
                 let r = if !self.adam { todo!() } else { 1.0 };
-                let tmp = t.detach() - &(&self.lr * r * &up);
                 //println!("{:?}", tmp.to_vec());
                 t.assign(t.detach() - &(&self.lr * r * up)).realize();
 
