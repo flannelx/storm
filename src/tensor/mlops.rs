@@ -1173,7 +1173,7 @@ impl Function for Permute {
 
     fn backward(&mut self, grad: LazyBuffer) -> Grad {
         Grad::One(
-            grad.permute(&argsort(
+            grad.permute(&argsort::<&[isize]>(
                 self.permute_order
                     .as_ref()
                     .expect("Permute bwd order should not be empty")

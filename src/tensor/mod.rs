@@ -971,8 +971,14 @@ impl Tensor {
 
     pub fn mul(&self, rhs: &Self) -> Self {
         let (a, b) = Tensor::_broadcast(&self, &rhs);
-        assert!(Arc::ptr_eq(&self.buffer.device_buffer, &a.buffer.device_buffer));
-        assert!(Arc::ptr_eq(&rhs.buffer.device_buffer, &b.buffer.device_buffer));
+        assert!(Arc::ptr_eq(
+            &self.buffer.device_buffer,
+            &a.buffer.device_buffer
+        ));
+        assert!(Arc::ptr_eq(
+            &rhs.buffer.device_buffer,
+            &b.buffer.device_buffer
+        ));
         Mul {
             need_input_grad: [a.require_grad, b.require_grad],
             ..Default::default()

@@ -1,7 +1,10 @@
-use num_traits::FromPrimitive;
 use kdam::{tqdm, BarExt};
+use num_traits::FromPrimitive;
 use rand::{seq::SliceRandom, thread_rng};
-use storm::{prelude::*, nn::optim::{adam, Optimizer}};
+use storm::{
+    nn::optim::{adam, Optimizer},
+    prelude::*,
+};
 
 pub fn main() {
     let training = true;
@@ -9,7 +12,7 @@ pub fn main() {
     if training {
         let optim = adam(&[&mut model.c1, &mut model.c2, &mut model.l1], 0.001);
         let batch_size = 128;
-        train(&model, optim, batch_size, 60000/batch_size).unwrap();
+        train(&model, optim, batch_size, 60000 / batch_size).unwrap();
     } else {
         eval(&model).unwrap();
     }
@@ -39,7 +42,11 @@ impl ConvNet {
         let d1 = x.shape().numel() / 28 / 28;
         let mut y = x.reshape([d1, 1, 28, 28]);
         y = y.conv2d(&self.c1).sigmoid();
-        y = y.conv2d(&self.c2).sigmoid().flatten().reshape([-1, self.l1.shape()[0]]);
+        y = y
+            .conv2d(&self.c2)
+            .sigmoid()
+            .flatten()
+            .reshape([-1, self.l1.shape()[0]]);
         y = y.matmul(&self.l1).sigmoid();
         y = y.matmul(&self.l2).sigmoid();
         y
@@ -62,12 +69,7 @@ impl ConvNet {
 }
 fn fetch_mnist_shuffled(
     batch_size: usize,
-) -> (
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-) {
+) -> (Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>) {
     use mnist::Mnist;
     let mnist = Mnist::from_download().expect("mnist download failed");
     let Mnist {
@@ -140,7 +142,7 @@ fn train<Optim: Optimizer>(
         //out.backward();
         let mut loss = (out - y).abs().mean();
         loss.realize();
-        println!("loss {:?}",loss.to_vec());
+        println!("loss {:?}", loss.to_vec());
         //loss.backward();
         //loss.realize();
         // optim.step();

@@ -113,9 +113,9 @@ pub trait Renderer: 'static + Send + Sync + Op {
                 }
             } else {
                 if x.float < 0.0 {
-                format!("({:?}f)", x.float)
+                    format!("({:?}f)", x.float)
                 } else {
-                format!("{:?}f", x.float)
+                    format!("{:?}f", x.float)
                 }
             }
         } else {

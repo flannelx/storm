@@ -250,7 +250,7 @@ pub trait Node: core::fmt::Debug {
     }
 
     fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
-        todo!("{:?}",self);
+        todo!("{:?}", self);
     }
 }
 
@@ -965,7 +965,11 @@ impl LtNode {
 #[allow(unused_variables)]
 impl Node for LtNode {
     fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
-        self.a.substitute(var_vars).lt(if self.b.is_num() { self.b.clone() } else { self.b.substitute(var_vars) })
+        self.a.substitute(var_vars).lt(if self.b.is_num() {
+            self.b.clone()
+        } else {
+            self.b.substitute(var_vars)
+        })
     }
 
     fn _mul(&self, rhs: ArcNode) -> ArcNode {

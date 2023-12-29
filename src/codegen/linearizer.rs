@@ -857,9 +857,16 @@ impl Linearizer {
                     // panic!("{:?}", idx.render_default());
                     let rendered_idx = self.render(idx);
 
-          //valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
+                    //valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
                     let valid_tuple = if valid.min().unwrap() == 0 {
-                        vec![self.render(valid), self._const(invalid_value.as_ref().unwrap().to_string(), localtype.clone(), None)]
+                        vec![
+                            self.render(valid),
+                            self._const(
+                                invalid_value.as_ref().unwrap().to_string(),
+                                localtype.clone(),
+                                None,
+                            ),
+                        ]
                     } else {
                         vec![]
                     };
@@ -868,12 +875,8 @@ impl Linearizer {
                     if let Some(bb) = barrier.take() {
                         vin.push(vec![bb])
                     }
-                    let tmp = self.uop_default(
-                        UOps::LOAD,
-                        Some(localtype.clone()),
-                        vin.concat(),
-                        vec![]
-                    );
+                    let tmp =
+                        self.uop_default(UOps::LOAD, Some(localtype.clone()), vin.concat(), vec![]);
                     self.load_cache.insert(key.clone(), tmp);
                 }
             }
@@ -1240,7 +1243,7 @@ impl Linearizer {
     }
 
     pub fn render(&mut self, node: ArcNode) -> UOp {
-        let ret =  match format!("{:?}", node.0).split(" ").next().unwrap() {
+        let ret = match format!("{:?}", node.0).split(" ").next().unwrap() {
             "MulNode" => {
                 let a = self.render(node.a().unwrap());
                 self.uop_alu_idx(a, node.b().unwrap(), OpType::Binary(Binary::Mul), None)

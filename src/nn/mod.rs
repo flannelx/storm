@@ -46,6 +46,13 @@ impl Conv2d {
     }
 
     pub fn call(&self, x: &Tensor) -> Tensor {
-        x._conv2d(&self.weights, self.bias.as_ref(), self.groups, self.stride, self.dilation, vec![self.padding])
+        x._conv2d(
+            &self.weights,
+            self.bias.as_ref(),
+            self.groups,
+            self.stride,
+            self.dilation,
+            vec![self.padding],
+        )
     }
 }

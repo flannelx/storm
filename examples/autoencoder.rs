@@ -177,10 +177,8 @@ fn main() -> Result<(), String> {
                     ]);
                 }
             }
-            let out = model.forward(&Tensor::from(
-                &*input).reshape(
-                [28 * 28 * upscale * upscale, 2],
-            ));
+            let out =
+                model.forward(&Tensor::from(&*input).reshape([28 * 28 * upscale * upscale, 2]));
             let out_vec = out.to_vec();
             for r in 0..28 * upscale {
                 for c in 0..28 * upscale {
@@ -235,14 +233,9 @@ fn main() -> Result<(), String> {
 fn fetch_mnist(
     batch_size: usize,
     shuffle: bool,
-) -> (
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-) {
-    use num_traits::FromPrimitive;
+) -> (Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>) {
     use mnist::Mnist;
+    use num_traits::FromPrimitive;
     let mnist = Mnist::from_download().expect("mnist download failed");
     let Mnist {
         train_images,

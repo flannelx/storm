@@ -252,13 +252,20 @@ impl View {
         if !_break {
             strides.extend(vec![0; new_shape.len() - strides.len()]);
             strides.reverse();
-            let (mask, off_mask, extra)  = _reshape_mask(self, new_shape);
+            let (mask, off_mask, extra) = _reshape_mask(self, new_shape);
             let total_offset = if let Some(om) = off_mask {
-                v![off * s, for (off, s) in izip!(om, strides.iter())].iter().sum()
+                v![off * s, for (off, s) in izip!(om, strides.iter())]
+                    .iter()
+                    .sum()
             } else {
                 0
             };
-            return Some(View::new(new_shape, Some(strides), Some(self.offset + total_offset), mask));
+            return Some(View::new(
+                new_shape,
+                Some(strides),
+                Some(self.offset + total_offset),
+                mask,
+            ));
         }
         None
     }
