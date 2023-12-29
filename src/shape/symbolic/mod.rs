@@ -255,7 +255,12 @@ pub trait Node: core::fmt::Debug {
 }
 
 pub fn iter_idxs(idxs: &[ArcNode]) -> std::vec::IntoIter<Vec<usize>> {
-    v![x.into_iter().rev().collect(), for x in cartesian_product(v![v![x, for x in v.min().unwrap() as usize..(v.max().unwrap() + 1) as usize], for v in idxs.iter().rev()])].into_iter()
+    let ret = v![x.into_iter().rev().collect(), for x in cartesian_product(v![v![x, for x in v.min().unwrap() as usize..(v.max().unwrap() + 1) as usize], for v in idxs.iter().rev()])].into_iter();
+    if ret.len() == 0 {
+        vec![vec![]].into_iter()
+    } else {
+        ret
+    }
 }
 
 pub fn create_node(ret: ArcNode) -> ArcNode {

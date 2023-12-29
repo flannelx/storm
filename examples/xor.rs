@@ -12,8 +12,8 @@ fn main() {
             }
         }
         pub fn forward(&mut self, x: &Tensor) -> Tensor {
-            let mut x = x.matmul(&self.l1);
-            x = x.matmul(&self.l2);
+            let mut x = x.matmul(&self.l1).sigmoid();
+            x = x.matmul(&self.l2).relu();
             x
         }
     }
@@ -23,14 +23,15 @@ fn main() {
     let mut optim = adam(&[&mut model.l1, &mut model.l2], 0.1);
     let x = Tensor::from([0f32, 0., 0., 1., 1., 0., 1., 1.]).reshape([4, 2]);
     let y = Tensor::from([0f32, 1., 1., 0.]).reshape([1, 4]);
-    for i in 0..3 {
+    for i in 0..10 {
         let out = model.forward(&x);
         //println!("{:?}", out.to_vec());
-        let mut loss = (&out - &y).mean();
+        let mut loss = &y - &out;
+        loss = (&loss * &loss).mean();
         optim.zero_grad();
         loss.backward();
         optim.step();
-        println!("{i}: {:?}", loss.to_vec());
+        println!("epoch:{i} loss: {:?}", loss.to_vec());
     }
 
     let t = Tensor::from([0., 0.]).reshape([1, 2]);

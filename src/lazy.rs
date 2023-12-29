@@ -196,7 +196,18 @@ impl LazyBuffer {
         )
     }
 
-    pub fn _const(&self, val: impl Display) -> Self {
+    pub fn _const(val: impl Display, dtype: Dtype, device: &str) -> Self {
+        Self::loadop(
+            OpType::Load(Load::Const),
+            &vec![1],
+            dtype,
+            device,
+            Some(vec![Arg::Str(val.to_string())]),
+            None,
+        )
+    }
+
+    pub fn const_like(&self, val: impl Display) -> Self {
         Self::loadop(
             OpType::Load(Load::Const),
             &vec![1],
@@ -218,7 +229,7 @@ impl LazyBuffer {
         let mut buf = DEVICE.alloc(x.len(), dtype::type_to_dtype::<T>());
         DEVICE.copyin(bytes, &*buf);
         Self {
-            lazyop: LazyOp::new(Load::Empty.into(), vec![], None).into(),
+            lazyop: LazyOp::new(Load::From.into(), vec![], None).into(),
             st: ShapeTracker::from_shape(&[x.len() as isize]).into(),
             device_buffer: Arc::new(Some(buf)),
             _base: None,
@@ -498,7 +509,7 @@ impl LazyBuffer {
     }
 
     pub fn reshape(&self, arg: &[isize]) -> Self {
-        assert!(!arg.is_empty());
+        //assert!(!arg.is_empty());
         if self.shape == arg {
             return self.clone();
         }
@@ -665,9 +676,6 @@ pub fn create_lazybuffer(
     base: Option<Arc<LazyBuffer>>,
 ) -> LazyBuffer {
     let optype = op.optype.clone();
-    if optype == Load::Const && st.shape().is_empty() {
-        panic!();
-    }
     if matches!(
         optype,
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
@@ -1024,7 +1032,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                     Load::Custom => todo!(),
                     _ => (),
                 }
-                println!("allocating mem for lb id:{}", si.out.id);
+                //println!("allocating mem for lb id:{}", si.out.id);
                 continue;
             }
             _ => (),

@@ -75,7 +75,11 @@ impl Tensor {
 
     pub fn from<V: Into<Vec<TensorDefaultType>>>(data: V) -> Self {
         let data = data.into();
-        let buffer = LazyBuffer::from_cpu(data);
+        let buffer = if data.len() == 1 {
+            LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>(), "GPU")
+        } else {
+            LazyBuffer::from_cpu(data)
+        };
         Self {
             require_grad: false,
             _ctx: None,
@@ -156,13 +160,7 @@ impl Tensor {
 
     pub fn _const(value: impl Display) -> Self {
         let dtype = crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>());
-        Self::_load(
-            OpType::Load(Load::Const),
-            1,
-            dtype,
-            None,
-            Some(vec![Arg::Str(value.to_string())]),
-        )
+        Self::from_buf(LazyBuffer::_const(value, dtype, "GPU"))
     }
 
     pub fn const_like<T: NumType>(&self, const_value: T) -> Self {
@@ -848,7 +846,7 @@ impl Tensor {
             "backward can only be called for scalar tensors, but it has shape {}",
             self.shape()
         );
-        (*self.grad.lock().unwrap()) = Some(Tensor::from([1f32]));
+        (*self.grad.lock().unwrap()) = Some(Tensor::_const(1f32));
         let deepwalked = self.deepwalk().into_iter();
         let _deepwalked_len = deepwalked.len();
         for mut t0 in deepwalked.rev() {
@@ -867,9 +865,9 @@ impl Tensor {
                     _ctx: None,
                     id: tensor_id(),
                 })],
-                Grad::Two(g1, g2) => {
+                Grad::Two(mut g1, mut g2) => {
                     let mut out = vec![];
-                    out.push(if let Some(g) = g1.as_ref() {
+                    out.push(if let Some(g) = g1.take() {
                         // if g.to_vec().iter().any(|n| n.is_nan()) {
                         //     panic!("g has NaN")
                         // } else {
@@ -878,7 +876,7 @@ impl Tensor {
                         Some(Tensor {
                             dtype: g.dtype.clone(),
                             device: g.device.clone(),
-                            buffer: g.clone(),
+                            buffer: g,
                             require_grad: false,
                             grad: Arc::default(),
                             _ctx: None,
@@ -887,7 +885,7 @@ impl Tensor {
                     } else {
                         None
                     });
-                    out.push(if let Some(g) = g2.as_ref() {
+                    out.push(if let Some(g) = g2.take() {
                         // if g.to_vec().iter().any(|n| n.is_nan()) {
                         //     panic!("g has NaN")
                         // } else {
@@ -896,7 +894,7 @@ impl Tensor {
                         Some(Tensor {
                             dtype: g.dtype.clone(),
                             device: g.device.clone(),
-                            buffer: g.clone(),
+                            buffer: g,
                             require_grad: false,
                             grad: Arc::default(),
                             _ctx: None,
@@ -1164,7 +1162,10 @@ impl Tensor {
     //   return out * (math.prod(out.shape)/math.prod(self.shape))
     pub fn mean(&self) -> Self {
         let out = self.sum_all();
-        out / self.shape().numel() as isize
+        if self.shape().dims.contains(&0) {
+            return out;
+        }
+        out * (1f32 / self.numel() as f32)
     }
 
     // def abs(self): return self.relu() + (-self).relu()

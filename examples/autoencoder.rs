@@ -56,7 +56,9 @@ fn main() -> Result<(), String> {
     //     model.load(model_path).unwrap();
     // }
     let mut optim = adam(&[&mut model.l1, &mut model.l2, &mut model.l3], 0.001);
-    let batch_size = 1;
+    let batch_size = 512;
+    let epochs = 300;
+    let k = 1;
     let (mut img_batched, _, _, _) = fetch_mnist(batch_size, false);
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;

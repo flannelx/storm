@@ -1,39 +1,19 @@
 use storm::prelude::*;
 
 fn main() {
-    let _a = Tensor::rand([10, 10]);
-    let _b = Tensor::rand([10, 10]);
-    let a = (&_a * 0.1);
-    let b = (&_b * 0.1);
-    println!("---------------------------");
-    println!("{:?}", (&a * &b).to_vec());
-    // println!(
-    //     "_a lbid: {:?}, device id {:?}",
-    //     _a.buffer.id, _a.buffer.device_buffer
-    // );
-    // println!(
-    //     "_b lbid: {:?}, device id {:?}",
-    //     _b.buffer.id, _b.buffer.device_buffer
-    // );
-    println!("{:?}", (&a.realize() * &b.realize()).to_vec());
-    // println!(
-    //     "_a lbid: {:?}, device id {:?}",
-    //     _a.buffer.id, _a.buffer.device_buffer
-    // );
-    // println!(
-    //     "_b lbid: {:?}, device id {:?}",
-    //     _b.buffer.id, _b.buffer.device_buffer
-    // );
-    // println!(
-    //     "a lbid: {:?} buf_ptr: {:?} weights: {:?}",
-    //     a.buffer.id,
-    //     (*a.buffer.device_buffer).as_ref().unwrap().ptr(),
-    //     a.to_vec()
-    // );
-    // println!(
-    //     "b lbid: {:?} buf_ptr: {:?} weights: {:?}",
-    //     b.buffer.id,
-    //     (*b.buffer.device_buffer).as_ref().unwrap().ptr(),
-    //     b.to_vec()
-    // );
+    // let mut a = Tensor::rand([10, 10]);
+    // a.require_grad = true;
+    // let y = Tensor::ones([10, 10]);
+    // let mut b = (&a * &y).mean();
+    // b.realize();
+    // b.backward();
+    // println!("grad: {:?}", a.grad.lock().unwrap().as_ref().unwrap().to_vec());
+
+    // let mut a = Tensor::ones([1]);
+    // let mut b = Tensor::rand([10,10]);
+    // println!("{:?}", (a*b).to_vec());
+
+
+    let a = Tensor::arange(10.);
+    println!("{:?}", a.to_vec());
 }

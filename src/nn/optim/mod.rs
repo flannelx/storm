@@ -103,6 +103,12 @@ impl Optimizer for LAMP {
 
     fn realize(&mut self) {
         let mut lst = vec![];
+        for b in self.m.iter() {
+            b.realize();
+        }
+        for b in self.v.iter() {
+            b.realize();
+        }
         for b in self.buffers.iter() {
             unsafe {
                 lst.push((**b).clone());
@@ -144,9 +150,6 @@ impl Optimizer for LAMP {
 
                 // just in case _ctx is attach in Function{}.apply() but shouldnt matter, but
                 // why not
-                self.m[i]._ctx = None;
-                self.v[i]._ctx = None;
-                g._ctx = None;
             }
         }
         self.realize()

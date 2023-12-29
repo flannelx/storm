@@ -250,7 +250,7 @@ impl Function for Sin {
     fn backward(&mut self, grad: LazyBuffer) -> Grad {
         let x = self.x.as_ref().unwrap();
         Grad::One(
-            x._const(core::f32::consts::PI / 2.0)
+            x.const_like(core::f32::consts::PI / 2.0)
                 .e(Binary::Sub, &[x.clone()], None)
                 .e(Unary::Sin, &[], None)
                 .e(Binary::Mul, &[grad.clone()], None),
@@ -293,7 +293,7 @@ impl Function for Log {
         self.x = Some(x.clone());
         x.e(Unary::Log2, &[], None).e(
             Binary::Mul,
-            &[x._const(2.0f32.log(core::f32::consts::E))],
+            &[x.const_like(2.0f32.log(core::f32::consts::E))],
             None,
         )
     }
@@ -338,7 +338,7 @@ impl Function for Exp {
         let ret = x
             .e(
                 Binary::Mul,
-                &[x._const(1f32 / 2.0f32.log(core::f32::consts::E))],
+                &[x.const_like(1f32 / 2.0f32.log(core::f32::consts::E))],
                 None,
             )
             .e(Unary::Exp2, &[], None);
@@ -391,7 +391,7 @@ impl Function for Sqrt {
         let ret = self.ret.as_ref().unwrap();
         Grad::One(grad.e(
             Binary::Div,
-            &[ret.e(Binary::Mul, &[ret._const(2.0f32)], None)],
+            &[ret.e(Binary::Mul, &[ret.const_like(2.0f32)], None)],
             None,
         ))
     }
@@ -528,7 +528,7 @@ impl Function for Max {
     fn backward(&mut self, grad: LazyBuffer) -> Grad {
         let x_ref = self.x.as_ref().unwrap();
         let ret_ref = self.ret.as_ref().unwrap();
-        let max_is_1s = x_ref._const(1.0).e(
+        let max_is_1s = x_ref.const_like(1.0).e(
             Binary::Sub,
             &[x_ref.e(Binary::Cmplt, &[ret_ref.expand(&x_ref.shape)], None)],
             None,
@@ -707,7 +707,7 @@ impl Function for Sub {
             None
         };
         let y = if self.need_input_grad[1] {
-            Some(grad._const(0.0).e(Binary::Sub, &[grad], None))
+            Some(grad.const_like(0.0).e(Binary::Sub, &[grad], None))
         } else {
             None
         };
@@ -761,7 +761,7 @@ impl Function for Mul {
     }
 
     fn backward(&mut self, grad: LazyBuffer) -> Grad {
-        let x = if self.need_input_grad[0] {
+        let y = if self.need_input_grad[0] {
             Some(
                 self.y
                     .as_ref()
@@ -771,7 +771,7 @@ impl Function for Mul {
         } else {
             None
         };
-        let y = if self.need_input_grad[1] {
+        let x = if self.need_input_grad[1] {
             Some(
                 self.x
                     .as_ref()
@@ -781,7 +781,7 @@ impl Function for Mul {
         } else {
             None
         };
-        Grad::Two(x, y)
+        Grad::Two(y, x)
     }
 
     fn parents_mut(&mut self) -> &mut Ctx {
@@ -887,13 +887,13 @@ impl Function for Sigmoid {
         const_: Option<Vec<u8>>,
     ) -> LazyBuffer {
         self.ret = Some(
-            x._const(1.0).e(
+            x.const_like(1.0).e(
                 Binary::Div,
-                &[x._const(1.0).e(
+                &[x.const_like(1.0).e(
                     Binary::Add,
                     &[x.e(
                         Binary::Mul,
-                        &[x._const(-1.0 / 2.0f32.log(core::f32::consts::E))],
+                        &[x.const_like(-1.0 / 2.0f32.log(core::f32::consts::E))],
                         None,
                     )
                     .e(Unary::Exp2, &[], None)],
@@ -911,7 +911,7 @@ impl Function for Sigmoid {
             ret_ref
                 .e(
                     Binary::Mul,
-                    &[ret_ref._const(1.0).e(
+                    &[ret_ref.const_like(1.0).e(
                         Binary::Sub,
                         &[self.ret.as_ref().unwrap().clone()],
                         None,
@@ -955,7 +955,7 @@ impl Function for Relu {
         shape: Option<&[isize]>,
         const_: Option<Vec<u8>>,
     ) -> LazyBuffer {
-        self.ret = Some(x.e(Binary::Max, &[x._const(0)], None));
+        self.ret = Some(x.e(Binary::Max, &[x.const_like(0)], None));
         self.ret.as_ref().unwrap().clone()
     }
 
@@ -964,7 +964,7 @@ impl Function for Relu {
             self.ret
                 .as_ref()
                 .unwrap()
-                ._const(0)
+                .const_like(0)
                 .e(Binary::Cmplt, &[self.ret.as_ref().unwrap().clone()], None)
                 .e(Binary::Mul, &[grad], None),
         )
@@ -1023,12 +1023,12 @@ impl Function for Where {
         let x = self.x.as_ref().expect("where bwd should have x now");
         Grad::Two(
             if self.need_input_grad[1] {
-                Some(x.e(Ternary::Where, &[grad.clone(), grad._const(0)], None))
+                Some(x.e(Ternary::Where, &[grad.clone(), grad.const_like(0)], None))
             } else {
                 None
             },
             if self.need_input_grad[2] {
-                Some(x.e(Ternary::Where, &[grad._const(0), grad.clone()], None))
+                Some(x.e(Ternary::Where, &[grad.const_like(0), grad.clone()], None))
             } else {
                 None
             },

@@ -178,6 +178,7 @@ impl Linearizer {
         // ]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce)
         // + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
         if !self.kernel.group_for_reduce.is_empty() {
+            println!("===============================");
             self.kernel.sts.push(ShapeTracker::from_shape(
                 &vec![
                     &vec![1; self.kernel.global_dims() as usize],
@@ -520,7 +521,7 @@ impl Linearizer {
         }
 
         // for u in self.uops.iter() {
-        //     println!("{:?} {:?} {:?}", u.uop, if u.vin.first().is_some() { Some(u.vin[0].uop.clone()) } else { None}, u.args.first());
+        //     println!("{:<20} {:<20} {:<20}", format!("{:?}",u.uop), format!("{:?}",if u.vin.first().is_some() { Some(u.vin[0].uop.clone()) } else { None}), format!("{:?}",u.args.first()));
         // }
         self.kernel.sts = sts_backup;
         self.kernel.group_for_reduce = gfr_backup;
@@ -788,7 +789,6 @@ impl Linearizer {
         } else {
             self.kernel.sts[i].expr_idxs(Some(fake_idxs.clone()))
         };
-        //if g_idx.render_default() == "gidx0[0-4]" { panic!() };
         // if amt > 1 {
         //     //TODO: localtype.vectorize()
         // }
@@ -904,7 +904,10 @@ impl Linearizer {
         let buf_uop = self.buf_ops[i].clone();
         assert!(buf_uop.is_some(), "buffer {i} wasn't UOped");
         let expanded_node = v![idx.expand(None), for idx in idxs.iter()];
-        let _idxs = v![x.iter().rev().map(|n| n.clone()).collect::<Vec<ArcNode>>(), for x in cartesian_product(expanded_node.clone().into_iter().rev().collect())];
+        let mut _idxs = v![x.iter().rev().map(|n| n.clone()).collect::<Vec<ArcNode>>(), for x in cartesian_product(expanded_node.clone().into_iter().rev().collect())];
+        if _idxs.len() == 0 {
+            _idxs = vec![vec![]];
+        }
         let store_offset = v![(i, s), for (i, s) in izip!(_idxs, store)];
         let upcast_dim = self.get_upcast_dim(i);
         if upcast_dim.len() == 1 && matches!(expanded_node[upcast_dim[0] as usize].len(), 2 | 4) {
