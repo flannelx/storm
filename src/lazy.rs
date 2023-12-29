@@ -110,8 +110,8 @@ impl core::fmt::Debug for LazyBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<LB:{} {:?} dtype={:?} op={:?} st={:?}>",
-            self.id.0, self.shape, self.dtype.type_name, self.lazyop.optype, self.st.views
+            "<LB {:?} dtype={:?} op={:?} st={:?}>",
+            self.shape, self.dtype.type_name, self.lazyop.optype, self.st.views
         )
     }
 }
@@ -1007,9 +1007,10 @@ lazy_static::lazy_static! {
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     //TODO: Need to "copyin/out" here to avoid alloc data to new buf instead of bufs that are
     //already allocated.
+    let debug_cache = false;
     while !schedule.is_empty() {
         let mut si = schedule.pop_front().unwrap();
-        println!("si optype {:?}", si.ast.optype);
+        //println!("si optype {:?}", si.ast.optype);
         for x in si.inputs.iter() {
             if !x.is_realized() {
                 panic!("Can't run schedule, {x:?} isnt't realized")
@@ -1028,39 +1029,30 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             }
             _ => (),
         }
+        if si.out.device_buffer.is_none() {
+            _realize_empty(&si.out);
+        }
+        let mut bufs = vec![(*si.out.device_buffer).as_ref().unwrap().clone()];
+        bufs.extend(v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()]);
         let cached = KERNEL_CACHED
             .lock()
             .unwrap()
             .get(&format!("{:?}", si))
             .map(|v| (*v).clone());
         if let Some(kernel) = cached {
-            // println!("\ncached hit");
-            // println!("{}", kernel.prg);
-            let prg = DEVICE.build(&kernel.name, &kernel.prg);
-            unsafe {
-                Arc::get_mut_unchecked(&mut si.out.device_buffer)
-                    .replace(kernel.buffers[0].clone());
+            if debug_cache {
+                println!("\ncached hit");
+                println!("{}", kernel.prg);
             }
+            let prg = DEVICE.build(&kernel.name, &kernel.prg);
             prg.run(
-                &vec![
-                    vec![kernel.buffers[0].clone()],
-                    v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()],
-                ]
-                .concat(),
+                &bufs,
                 kernel.global_size.as_ref(),
                 Some(kernel.local_size.as_ref()),
                 &[],
                 &[],
             );
         } else {
-            //println!("\nzero hit");
-            if si.out.device_buffer.is_none() {
-                _realize_empty(&si.out);
-            }
-            let mut bufs = vec![(*si.out.device_buffer).as_ref().unwrap().clone()];
-            bufs.extend(
-                v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()],
-            );
             let mut lin = DEVICE.get_lin(si.ast.clone());
             lin.linearize();
             let global_size = if let Some(mut gs) = lin.global_size.clone() {
@@ -1086,7 +1078,10 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                     buffers: v![b.clone(), for b in bufs.iter()],
                 },
             );
-            //println!("{prg}");
+            if debug_cache {
+                println!("\nzero hit");
+                println!("{prg}");
+            }
             let prg = DEVICE.build(&name, &prg);
             prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
         }
