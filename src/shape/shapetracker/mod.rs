@@ -245,18 +245,6 @@ impl ShapeTracker {
             return ShapeTracker { views };
         }
         views.push(view!(new_shape));
-        // if new_view.is_none() {
-        //     let extra = View::new(new_shape, None, None, None);
-        //     if let Some(merged_view) = merge_view(self.views.last().unwrap(), &extra) {
-        //         views.pop();
-        //         views.push(merged_view);
-        //     } else {
-        //         views.push(extra);
-        //     }
-        // } else {
-        //     views.pop();
-        //     views.push(new_view.unwrap());
-        // }
         ShapeTracker { views }
     }
 

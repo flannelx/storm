@@ -179,14 +179,14 @@ impl View {
                 m.iter()
                     .zip(self.shape.iter().zip(new_shape))
                     .map(|(&m, (&s, &ns))| {
-                        if m != (0, 1) {
-                            (0, 0)
-                        } else {
-                            if s != ns {
-                                (0, ns)
+                        if s != ns {
+                            if m != (0, 1) {
+                                (0, 0)
                             } else {
-                                m
+                                (0, ns)
                             }
+                        } else {
+                            m
                         }
                     })
                     .collect::<Vec<(isize, isize)>>(),
@@ -260,12 +260,14 @@ impl View {
             } else {
                 0
             };
-            return Some(View::new(
-                new_shape,
-                Some(strides),
-                Some(self.offset + total_offset),
-                mask,
-            ));
+            if !extra {
+                return Some(View::new(
+                    new_shape,
+                    Some(strides),
+                    Some(self.offset + total_offset),
+                    mask,
+                ));
+            }
         }
         None
     }
