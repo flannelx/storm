@@ -21,14 +21,14 @@ pub fn main() {
         //     println!("couldn't find discriminator safetensor, ignoring...")
         // };
         let out_noise = Tensor::randn([16, 128]);
-        let (epochs, batch_size, k) = (300, 50, 2);
-        let n_steps = 30;
+        let (epochs, batch_size, k) = (300, 2, 2);
+        let n_steps = 2;
         let (train_img, _, _, _) = fetch_mnist_shuffled(batch_size);
         let mut gen_optim =
-            adam_with(&[&mut generator.l1, &mut generator.l2], &[0.0002, 0.5]);
+            adam_with(&[&mut generator.l1, &mut generator.l2], &[1., 0.5]);
 
         let mut disc_optim =
-            adam_with(&[&mut discriminator.l1, &mut discriminator.l2], &[0.0002, 0.5]);
+            adam_with(&[&mut discriminator.l1, &mut discriminator.l2], &[1., 0.5]);
 
         let mut pb = tqdm!(total = epochs);
         pb.set_description(format!(
@@ -134,7 +134,7 @@ impl LinearGen {
         let mut x = x.matmul(&self.l1).leakyrelu(Some(0.2));
         x = x.matmul(&self.l2).leakyrelu(Some(0.2));
         x = x.matmul(&self.l3).leakyrelu(Some(0.2));
-        x = x.matmul(&self.l4).tanh();
+        x = x.matmul(&self.l4).sigmoid();
         x
     }
 

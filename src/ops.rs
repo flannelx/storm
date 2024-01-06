@@ -220,7 +220,7 @@ optype_impl!(Buffer);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum LazyOpSrc {
     LazyOp(LOArc),
-    LazyBuffer(LazyBuffer),
+    LazyBuffer(Arc<LazyBuffer>),
 }
 
 impl From<LazyOp> for LazyOpSrc {
@@ -231,7 +231,7 @@ impl From<LazyOp> for LazyOpSrc {
 
 impl From<LazyBuffer> for LazyOpSrc {
     fn from(value: LazyBuffer) -> Self {
-        LazyOpSrc::LazyBuffer(value)
+        LazyOpSrc::LazyBuffer(Arc::new(value))
     }
 }
 
@@ -246,7 +246,7 @@ impl LazyOpSrc {
     pub fn to_lb(self) -> LazyBuffer {
         match self {
             LazyOpSrc::LazyOp(_) => panic!("Lazyop cant turn into lazybuffer"),
-            LazyOpSrc::LazyBuffer(lb) => lb,
+            LazyOpSrc::LazyBuffer(lb) => (*lb).clone(),
         }
     }
 
@@ -267,7 +267,7 @@ impl LazyOpSrc {
     pub fn lb_mut(&mut self) -> &mut LazyBuffer {
         match self {
             LazyOpSrc::LazyOp(_) => panic!("Lazyop cant turn into lazybuffer"),
-            LazyOpSrc::LazyBuffer(lb) => lb,
+            LazyOpSrc::LazyBuffer(lb) => unsafe { Arc::get_mut_unchecked(lb)},
         }
     }
 
@@ -304,7 +304,7 @@ impl LazyOpSrc {
 pub struct LazyOp {
     pub optype: OpType,
     pub src: Vec<LazyOpSrc>,
-    pub buffers: Vec<LazyBuffer>,
+    pub buffers: Vec<Arc<LazyBuffer>>,
     pub args: Vec<Arg>,
 }
 
@@ -317,13 +317,13 @@ pub trait LazyOpsDefaultImpl {
         unimplemented!();
     }
 
-    fn children(&self) -> &[LazyBuffer] {
+    fn children(&self) -> &[Arc<LazyBuffer>] {
         unimplemented!();
     }
 }
 
 impl LazyOpsDefaultImpl for LazyOp {
-    fn children(&self) -> &[LazyBuffer] {
+    fn children(&self) -> &[Arc<LazyBuffer>] {
         &self.buffers
     }
 }

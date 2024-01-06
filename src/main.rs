@@ -1,3 +1,6 @@
+
+use std::sync::{Weak, Arc};
+
 use storm::prelude::*;
 
 fn main() {
@@ -12,8 +15,14 @@ fn main() {
     // let mut a = Tensor::ones([1]);
     // let mut b = Tensor::rand([10,10]);
     // println!("{:?}", (a*b).to_vec());
+    let hold = Arc::new(1);
+    let f = Foo {
+        n: Arc::downgrade(&hold)
+    };
 
+    println!("{:?}", f.n.upgrade());
+}
 
-    let a = Tensor::_arange(-10.0, 0.0, 1.);
-    println!("{:?}", a.pow(2, false).to_vec());
+struct Foo {
+    n: Weak<usize>,
 }

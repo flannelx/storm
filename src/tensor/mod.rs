@@ -1233,6 +1233,7 @@ impl Tensor {
         };
         let mut base_sign = if !reverse { self.sign() } else { x.sign() };
         base_sign = (&base_sign - 1) / -2;
+        // ar.mul(&(sign * &base_sign + (1 - &base_sign)))
         ar.mul(&(sign * &base_sign))
     }
 

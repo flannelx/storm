@@ -24,7 +24,7 @@ fn main() {
     let mut optim = adam(&[&mut model.l1, &mut model.l2], 1.);
     let x = Tensor::from([0., 0., 0., 1., 1., 0., 1., 1.]).reshape([4, 2]);
     let y = Tensor::from([0., 1., 1., 0.]).reshape([4]);
-    for i in 0..10000 {
+    for i in 0..200 {
         let out = model.forward(&x);
         //println!("{:?}", out.to_vec());
         let mut loss = &y - &out;

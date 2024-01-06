@@ -80,7 +80,6 @@ impl DerefMut for STArc {
     }
 }
 
-#[derive(Clone)]
 pub struct LazyBuffer {
     pub lazyop: LOArc,
     pub st: STArc,
@@ -92,6 +91,23 @@ pub struct LazyBuffer {
     pub id: LazyBufferId,
     pub dtype: Dtype,
     pub device: String,
+}
+
+impl Clone for LazyBuffer {
+    fn clone(&self) -> Self {
+        Self {
+            lazyop: LOArc(Arc::new((*self.lazyop).clone())),
+            st: STArc(Arc::new((*self.st).clone())),
+            device_buffer: self.device_buffer.clone(),
+            _base: self._base.clone(),
+            shape: self.shape.clone(),
+            children: self.children.clone(),
+            views: self.views.clone(),
+            id: self.id.clone(),
+            dtype: self.dtype.clone(),
+            device: self.device.clone(),
+        }
+    }
 }
 
 impl PartialEq for LazyBuffer {
@@ -143,7 +159,9 @@ impl LazyBuffer {
         };
         let rc = ret.clone();
         for x in ret.lazyop.buffers.iter_mut() {
-            x.children.insert(rc.clone());
+            unsafe {
+                Arc::get_mut_unchecked(x).children.insert(rc.clone());
+            }
         }
         if ret._base.is_some() {
             unsafe {
@@ -275,7 +293,7 @@ impl LazyBuffer {
                 ShapeTracker::from_shape(&self.shape),
                 LazyOp::new(
                     OpType::Load(Load::Contiguous),
-                    vec![LazyOpSrc::LazyBuffer(self.clone())],
+                    vec![LazyOpSrc::LazyBuffer(Arc::new(self.clone()))],
                     None,
                 ),
                 self.dtype.clone(),
@@ -705,7 +723,7 @@ fn _ast_reduceops(op: &LazyOp) -> LazyOp {
     let src = if matches!(src.lazyop.optype, OpType::Binary(_)) && src.children.len() <= 1 {
         LazyOpSrc::LazyOp(src.lazyop.clone())
     } else {
-        LazyOpSrc::LazyBuffer(src.clone())
+        LazyOpSrc::LazyBuffer(Arc::new(src.clone()))
     };
     LazyOp::new(op.optype.clone(), vec![src], Some(op.args.clone()))
 }
@@ -714,7 +732,7 @@ fn _ast_binaryops(op: &LazyOp, shape: &[isize]) -> LazyOp {
     let mut real_srcs: HashMap<&LazyBuffer, Option<LazyOpSrc>> = {
         let mut m = HashMap::new();
         for x in &op.buffers {
-            m.insert(x, None);
+            m.insert(x.as_ref(), None);
         }
         m
     };
@@ -758,7 +776,7 @@ fn _ast_binaryops(op: &LazyOp, shape: &[isize]) -> LazyOp {
     }
     for (k, v) in real_srcs.iter_mut() {
         if v.is_none() {
-            *v = Some(LazyOpSrc::LazyBuffer(k.reshape(intermediate_shape)));
+            *v = Some(LazyOpSrc::LazyBuffer(Arc::new(k.reshape(intermediate_shape))));
         }
     }
     let mut tmp = HashMap::new();
@@ -946,7 +964,7 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
         let st = x.st.simplify();
         if base_bufs.contains(&x.base()) {
             replacements.insert(
-                x.clone(),
+                (**x).clone(),
                 LazyOp::new(
                     OpType::Buffer(ops::Buffer::Load),
                     vec![],
@@ -962,7 +980,7 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
             );
         } else if !x.is_realized() && matches!(x.base().lazyop.optype, OpType::Load(Load::Const)) {
             replacements.insert(
-                x.clone(),
+                (**x).clone(),
                 LazyOp::new(
                     OpType::Buffer(ops::Buffer::Const),
                     vec![],
@@ -1236,7 +1254,7 @@ pub fn replace_with_movement_ops(src: &LazyOpSrc, ops: &[(OpType, Vec<isize>)]) 
             );
         }
         LazyOpSrc::LazyBuffer(y) => {
-            let mut y = y.clone();
+            let mut y = (**y).clone();
             for (op, arg) in ops {
                 match op {
                     OpType::Movement(m) => match m {
