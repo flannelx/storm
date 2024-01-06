@@ -14,7 +14,6 @@ fn main() {
     // println!("{:?}", (a*b).to_vec());
 
 
-    let a = Tensor::arange(10.);
-    println!("{:?}", a.buffer.st);
-    println!("{:?}", a.to_vec());
+    let a = Tensor::_arange(-10.0, 0.0, 1.);
+    println!("{:?}", a.pow(2, false).to_vec());
 }

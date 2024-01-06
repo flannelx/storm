@@ -998,11 +998,9 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
 
 #[derive(Debug, Clone)]
 pub struct KernelCache {
-    name: String,
-    prg: String,
+    prg: Arc<dyn Program>,
     global_size: Vec<usize>,
     local_size: Vec<usize>,
-    buffers: Vec<Arc<dyn Buffer>>,
 }
 
 unsafe impl Send for KernelCache {}
@@ -1050,10 +1048,8 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
         if let Some(kernel) = cached {
             if debug_cache {
                 println!("\ncached hit");
-                println!("{}", kernel.prg);
             }
-            let prg = DEVICE.build(&kernel.name, &kernel.prg);
-            prg.run(
+            kernel.prg.run(
                 &bufs,
                 kernel.global_size.as_ref(),
                 Some(kernel.local_size.as_ref()),
@@ -1075,23 +1071,21 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             } else {
                 vec![]
             };
-            let (name, prg) = DEVICE.render(lin);
+            let (name, prg_str) = DEVICE.render(lin);
+            if debug_cache {
+                println!("\nzero hit");
+                println!("{prg_str}");
+            }
+            let prg = DEVICE.build(&name, &prg_str);
+            prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
             KERNEL_CACHED.lock().unwrap().insert(
                 format!("{:?}", si),
                 KernelCache {
-                    name: name.clone(),
-                    prg: prg.clone(),
+                    prg,
                     global_size: global_size.clone(),
                     local_size: local_size.clone(),
-                    buffers: v![b.clone(), for b in bufs.iter()],
                 },
             );
-            if debug_cache {
-                println!("\nzero hit");
-                println!("{prg}");
-            }
-            let prg = DEVICE.build(&name, &prg);
-            prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
         }
     }
 }

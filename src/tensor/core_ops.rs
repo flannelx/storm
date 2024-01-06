@@ -155,3 +155,15 @@ impl core::ops::Neg for &Tensor {
         self * -1.0
     }
 }
+
+impl From<f32> for Tensor {
+    fn from(value: f32) -> Self {
+        Self::_const(value)
+    }
+}
+
+impl From<isize> for Tensor {
+    fn from(value: isize) -> Self {
+        Self::_const(value)
+    }
+}

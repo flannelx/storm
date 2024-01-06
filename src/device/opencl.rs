@@ -70,19 +70,23 @@ impl Program for CLProgram {
         extra: &[String],
     ) {
         unsafe {
-            //opencl3::command_queue::enqueue_nd_range_kernel(command_queue, kernel, work_dim, global_work_offset, global_work_dims, local_work_dims, num_events_in_wait_list, event_wait_list)
-            let mut ek = ExecuteKernel::new(&self.kernel);
-            for b in bufs {
-                ek.set_arg(&b.ptr());
+            for (i, b) in bufs.into_iter().enumerate() {
+                self.kernel.set_arg(i as _, &b.ptr());
             }
-
-            //check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))  # noqa: E501
-            ek.set_global_work_sizes(global_size);
-            if let Some(lws) = local_size {
-                ek.set_local_work_sizes(lws);
-            }
-            ek.enqueue_nd_range(&self.device.queue)
-                .expect("enqueue failed");
+            opencl3::command_queue::enqueue_nd_range_kernel(
+                self.device.queue.get(),
+                self.kernel.get(),
+                global_size.len() as _,
+                std::ptr::null(),
+                global_size.as_ptr() as _,
+                if local_size.is_some() {
+                    local_size.as_ref().unwrap().as_ptr() as _
+                } else {
+                    std::ptr::null()
+                },
+                0,
+                std::ptr::null(),
+            ).expect("enqueue failed");
         }
     }
 }

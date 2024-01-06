@@ -1204,24 +1204,59 @@ impl Tensor {
         }
     }
 
-    pub fn pow<T: Into<TensorInputVal>>(&self, val: T, reverse: bool) -> Self {
-        todo!()
+    pub fn pow<V: Into<Self>>(&self, x: V, reverse: bool) -> Self {
+        let x = x.into();
+        if x.is_const() && !reverse {
+            let cv = x.get_const_val().unwrap();
+            match cv as isize {
+                isize::MIN..0 => {
+                    return self.reciprocal().pow(-x, false);
+                }
+                0..=3 => {
+                    let mut acc = self.const_like(1);
+                    for i in 0..cv as usize {
+                        acc = &acc * self;
+                    }
+                    return acc;
+                }
+                _ => (),
+            }
+            if cv == 0.5 {
+                return self.sqrt();
+            }
+        }
+        let ar = self.abs().log().mul(&x).exp();
+        let sign = if !reverse {
+            (&x * std::f32::consts::PI).cos()
+        } else {
+            (self * std::f32::consts::PI).cos()
+        };
+        let mut base_sign = if !reverse { self.sign() } else { x.sign() };
+        base_sign = (&base_sign - 1) / -2;
+        ar.mul(&(sign * &base_sign))
     }
-}
 
-pub enum TensorInputVal {
-    Tensor(Tensor),
-    Const(TensorDefaultType),
-}
-
-impl From<Tensor> for TensorInputVal {
-    fn from(value: Tensor) -> Self {
-        Self::Tensor(value)
+    pub fn sign(&self) -> Self {
+        self / &(self.abs() + 1e-12)
     }
-}
 
-impl From<TensorDefaultType> for TensorInputVal {
-    fn from(value: TensorDefaultType) -> Self {
-        Self::Const(value)
+    pub fn reciprocal(&self) -> Self {
+        1.0 / self
+    }
+
+    pub fn is_const(&self) -> bool {
+        if self.buffer.lazyop.optype == Load::Const {
+            return true;
+        }
+        false
+    }
+
+    pub fn get_const_val(&self) -> anyhow::Result<TensorDefaultType> {
+        if !self.is_const() {
+            return Err(anyhow::anyhow!("Tensor is not const"));
+        }
+        Ok(self.buffer.lazyop.args[0]
+            .to_str()
+            .parse::<TensorDefaultType>()?)
     }
 }
