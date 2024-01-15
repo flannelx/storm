@@ -55,11 +55,8 @@ fn main() -> Result<(), String> {
     // if load {
     //     model.load(model_path).unwrap();
     // }
-    let mut optim = adam(&[&mut model.l1, &mut model.l2, &mut model.l3], 0.001);
+    let mut optim = adam(&[&mut model.l1, &mut model.l2, &mut model.l3], 0.005);
     let batch_size = 1;
-    let n_size = 2;
-    let epochs = 300;
-    let k = 1;
     let (mut img_batched, _, _, _) = fetch_mnist(batch_size, false);
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -77,26 +74,28 @@ fn main() -> Result<(), String> {
     canvas.present();
     let mut i = 0;
     let mut latent_value = 0.0f32;
-    let img = &img_batched[10057];
-    let mut input = vec![];
-    let mut y = vec![];
-    for r in 0..28 {
-        for c in 0..28 {
-            let v = img[r * 28 + c] / 255.;
-            input.extend(vec![r as f32 / 27., c as f32 / 27.]);
-            y.push(v);
-        }
-    }
-    for _ in 0..n_size {
-        input.extend(input.clone());
-    }
     'mainloop: loop {
         if train {
+            if i >= img_batched.len() {
+                let mut rng = thread_rng();
+                img_batched.shuffle(&mut rng);
+                i = 0;
+            }
             canvas.clear();
             optim.zero_grad();
-            let x: Tensor = Tensor::from(&*input).reshape([28 * 28 * n_size, 2]);
+            let img = &img_batched[10057];
+            let mut input = vec![];
+            let mut y = vec![];
+            for r in 0..28 {
+                for c in 0..28 {
+                    let v = img[r * 28 + c] / 255.;
+                    input.extend(vec![r as f32 / 27., c as f32 / 27.]);
+                    y.push(v);
+                }
+            }
+            let x: Tensor = Tensor::from(&*input).reshape([28 * 28, 2]);
             let x = x.detach();
-            let y: Tensor = Tensor::from(&*y).reshape([28 * 28 * n_size, 1]);
+            let y: Tensor = Tensor::from(&*y).reshape([28 * 28, 1]);
             let y = y.detach();
             // let y: Tensor<Cpu> =
             //     Tensor::from_shape(&*img_batched[10057], [batch_size, 28 * 28]) / 255.0;
@@ -178,8 +177,10 @@ fn main() -> Result<(), String> {
                     ]);
                 }
             }
-            let out =
-                model.forward(&Tensor::from(&*input).reshape([28 * 28 * upscale * upscale, 2]));
+            let out = model.forward(&Tensor::from(
+                &*input).reshape(
+                [28 * 28 * upscale * upscale, 2],
+            ));
             let out_vec = out.to_vec();
             for r in 0..28 * upscale {
                 for c in 0..28 * upscale {
@@ -234,9 +235,14 @@ fn main() -> Result<(), String> {
 fn fetch_mnist(
     batch_size: usize,
     shuffle: bool,
-) -> (Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>) {
-    use mnist::Mnist;
+) -> (
+    Vec<Vec<f32>>,
+    Vec<Vec<f32>>,
+    Vec<Vec<f32>>,
+    Vec<Vec<f32>>,
+) {
     use num_traits::FromPrimitive;
+    use mnist::Mnist;
     let mnist = Mnist::from_download().expect("mnist download failed");
     let Mnist {
         train_images,
