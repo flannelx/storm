@@ -463,24 +463,24 @@ impl LazyBuffer {
     }
 
     pub fn _movement_op(&self, st: ShapeTracker, optype: OpType, arg: &[isize]) -> Self {
-        if !self.is_realized()
-            && matches!(self.lazyop.optype, OpType::Binary(_))
-            && self.children.len() == 0
-        {
-            if matches!(
-                optype,
-                OpType::Movement(Movement::Shrink)
-                    | OpType::Movement(Movement::Stride)
-                    | OpType::Movement(Movement::Permute)
-            ) || (matches!(optype, OpType::Movement(Movement::Reshape))
-                && matches!(self.lazyop.optype, OpType::Unary(_)))
-            {
-                return replace_with_movement_ops(
-                    &(*self.lazyop.0).clone().into(),
-                    &[(self.lazyop.optype.clone(), arg.to_vec())],
-                );
-            }
-        }
+        // if !self.is_realized()
+        //     && matches!(self.lazyop.optype, OpType::Binary(_))
+        //     && self.children.len() == 0
+        // {
+        //     if matches!(
+        //         optype,
+        //         OpType::Movement(Movement::Shrink)
+        //             | OpType::Movement(Movement::Stride)
+        //             | OpType::Movement(Movement::Permute)
+        //     ) || (matches!(optype, OpType::Movement(Movement::Reshape))
+        //         && matches!(self.lazyop.optype, OpType::Unary(_)))
+        //     {
+        //         return replace_with_movement_ops(
+        //             &(*self.lazyop.0).clone().into(),
+        //             &[(self.lazyop.optype.clone(), arg.to_vec())],
+        //         );
+        //     }
+        // }
         // if matches!(self.lazyop.optype, OpType::Binary(_))
         //     && !self.is_realized()
         //     && (matches!(
