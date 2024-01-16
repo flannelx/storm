@@ -80,34 +80,18 @@ impl DerefMut for STArc {
     }
 }
 
+#[derive(Clone)]
 pub struct LazyBuffer {
     pub lazyop: LOArc,
     pub st: STArc,
     pub device_buffer: Arc<Option<Arc<dyn Buffer>>>, // TODO: Does it have to be shared before realized?
     pub _base: Option<Arc<LazyBuffer>>,
     pub shape: Vec<isize>,
-    pub children: HashSet<LazyBuffer>,
-    pub views: HashSet<LazyBuffer>,
+    // pub children: HashSet<LazyBuffer>,
+    // pub views: HashSet<LazyBuffer>,
     pub id: LazyBufferId,
     pub dtype: Dtype,
     pub device: String,
-}
-
-impl Clone for LazyBuffer {
-    fn clone(&self) -> Self {
-        Self {
-            lazyop: LOArc(Arc::new((*self.lazyop).clone())),
-            st: STArc(Arc::new((*self.st).clone())),
-            device_buffer: self.device_buffer.clone(),
-            _base: self._base.clone(),
-            shape: self.shape.clone(),
-            children: self.children.clone(),
-            views: self.views.clone(),
-            id: self.id.clone(),
-            dtype: self.dtype.clone(),
-            device: self.device.clone(),
-        }
-    }
 }
 
 impl PartialEq for LazyBuffer {
@@ -146,8 +130,8 @@ impl LazyBuffer {
             lazyop: op.into(),
             shape: st.shape(),
             st: st.into(),
-            children: HashSet::new(),
-            views: HashSet::new(),
+            // children: HashSet::new(),
+            // views: HashSet::new(),
             id: lb_id(),
             dtype,
             device_buffer: if base.is_some() {
@@ -159,16 +143,16 @@ impl LazyBuffer {
         };
         let rc = ret.clone();
         for x in ret.lazyop.buffers.iter_mut() {
-            unsafe {
-                Arc::get_mut_unchecked(x).children.insert(rc.clone());
-            }
+            // unsafe {
+            //     Arc::get_mut_unchecked(x).children.insert(rc.clone());
+            // }
         }
         if ret._base.is_some() {
-            unsafe {
-                Arc::get_mut_unchecked(&mut ret._base.as_mut().unwrap())
-                    .views
-                    .insert(rc.clone())
-            };
+            // unsafe {
+            //     Arc::get_mut_unchecked(&mut ret._base.as_mut().unwrap())
+            //         .views
+            //         .insert(rc.clone())
+            // };
         } else {
             assert!(ret.st.contiguous(), "{:?}", ret.st);
         }
@@ -252,8 +236,8 @@ impl LazyBuffer {
             device_buffer: Arc::new(Some(buf)),
             _base: None,
             shape: vec![x.len() as isize],
-            children: HashSet::new(),
-            views: HashSet::new(),
+            // children: HashSet::new(),
+            // views: HashSet::new(),
             id: lb_id(),
             dtype: dtype::type_to_dtype::<T>(),
             device: "GPU".into(),
@@ -376,7 +360,6 @@ impl LazyBuffer {
             .iter()
             .map(|x| {
                 if matches!(x.lazyop.optype, OpType::Binary(_))
-                    && x.children.len() == 0
                     && !x.is_realized()
                 {
                     (*x.lazyop).clone().into()
@@ -534,7 +517,7 @@ impl LazyBuffer {
         if !self.is_realized() && self.lazyop.optype == Movement::Reshape {
             let s_clone = self.clone();
             let mut ret = self.lazyop.src[0].clone();
-            ret.lb_mut().children.remove(&s_clone);
+            //ret.lb_mut().children.remove(&s_clone);
             return ret.lb_mut().reshape(arg);
         }
         self._movement_op(
@@ -603,7 +586,7 @@ impl LazyBuffer {
                         if let Some(shape_idx_groups) =
                             get_contraction(&self.lazyop.src[0].lb().shape, &self.shape)
                         {
-                            self.lazyop.clone().src[0].lb_mut().children.remove(self);
+                            //self.lazyop.clone().src[0].lb_mut().children.remove(self);
                             return self.lazyop.src[0]
                                 .lb()
                                 .permute(
@@ -625,7 +608,7 @@ impl LazyBuffer {
                         .collect::<Vec<isize>>();
                     let mut src = self.lazyop.src[0].clone();
                     let optype = &self.lazyop.optype;
-                    src.lb_mut().children.remove(self);
+                    //src.lb_mut().children.remove(self);
                     return src.lb().permute(arg).r(optype.clone(), &narg);
                 }
                 t => (),
@@ -720,7 +703,7 @@ fn _ast_reduceops(op: &LazyOp) -> LazyOp {
     if src.is_realized() {
         return ret;
     }
-    let src = if matches!(src.lazyop.optype, OpType::Binary(_)) && src.children.len() <= 1 {
+    let src = if matches!(src.lazyop.optype, OpType::Binary(_))  {
         LazyOpSrc::LazyOp(src.lazyop.clone())
     } else {
         LazyOpSrc::LazyBuffer(Arc::new(src.clone()))
@@ -746,8 +729,6 @@ fn _ast_binaryops(op: &LazyOp, shape: &[isize]) -> LazyOp {
             matches!(x.lazyop.optype, OpType::Reduce(_))
                 && !x.is_realized()
                 && k.shape.iter().product::<isize>() == x.shape.iter().product::<isize>()
-                && x.children.len() <= 1
-                && k.children.len() <= 1
         })
         .collect();
     let mut intermediate_shape = shape;
@@ -827,7 +808,6 @@ fn _push_movement_ops(srcs: &[&LazyBuffer]) -> Vec<LazyBuffer> {
         while !bx.is_realized()
             && matches!(bx.lazyop.optype, OpType::Movement(_))
             && bx.lazyop.optype != Movement::Expand
-            && bx.children.len() <= 1
         {
             mops.push((bx.lazyop.optype.clone(), bx.lazyop.args.clone()));
             assert!(matches!(bx.lazyop.src[0], LazyOpSrc::LazyBuffer(_)));
@@ -836,7 +816,6 @@ fn _push_movement_ops(srcs: &[&LazyBuffer]) -> Vec<LazyBuffer> {
         if mops.len() > 0
             && !bx.is_realized()
             && matches!(bx.lazyop.optype, OpType::Binary(_))
-            && bx.children.len() <= 1
             && mops.iter().all(|m| m.0 != Movement::Pad)
         {
             new_srcs.push((*x).clone());
