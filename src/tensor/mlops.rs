@@ -76,7 +76,7 @@ pub trait Function: DynClone + core::fmt::Debug {
         shape: Option<&[isize]>,
         const_: Option<Vec<u8>>,
     ) -> LazyBuffer;
-    fn backward(&mut self, grad: LazyBuffer) -> Grad;
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad;
     fn parents_mut(&mut self) -> &mut Ctx;
     fn parents_ref(&self) -> &Ctx;
     fn apply(
@@ -119,7 +119,7 @@ pub trait Function: DynClone + core::fmt::Debug {
         Tensor {
             device: ret_buffer.device.clone(),
             dtype: ret_buffer.dtype.clone(),
-            buffer: ret_buffer,
+            buffer: ret_buffer.into(),
             require_grad,
             _ctx: if require_grad {
                 Some(dyn_clone::clone_box(&*ctx))
@@ -184,8 +184,8 @@ impl Function for Contiguous {
         x.contiguous()
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
-        Grad::One(grad)
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
+        Grad::One(grad.clone())
     }
 
     fn parents_mut(&mut self) -> &mut Ctx {
@@ -247,7 +247,7 @@ impl Function for Sin {
         x.e(Unary::Sin, &[], None)
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let x = self.x.as_ref().unwrap();
         Grad::One(
             x.const_like(core::f32::consts::PI / 2.0)
@@ -298,7 +298,7 @@ impl Function for Log {
         )
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         Grad::One(grad.e(Binary::Div, &[self.x.as_ref().unwrap().clone()], None))
     }
 
@@ -346,8 +346,8 @@ impl Function for Exp {
         ret
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
-        Grad::One(self.ret.as_ref().unwrap().e(Binary::Mul, &[grad], None))
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
+        Grad::One(self.ret.as_ref().unwrap().e(Binary::Mul, &[grad.clone()], None))
     }
 
     fn parents_mut(&mut self) -> &mut Ctx {
@@ -387,7 +387,7 @@ impl Function for Sqrt {
         self.ret.as_ref().unwrap().clone()
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let ret = self.ret.as_ref().unwrap();
         Grad::One(grad.e(
             Binary::Div,
@@ -446,7 +446,7 @@ impl Function for Sum {
         x.r(Reduce::Sum, shape)
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         // let input_shape = self
         //     .input_shape
         //     .as_ref()
@@ -525,7 +525,7 @@ impl Function for Max {
         ret
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let x_ref = self.x.as_ref().unwrap();
         let ret_ref = self.ret.as_ref().unwrap();
         let max_is_1s = x_ref.const_like(1.0).e(
@@ -594,7 +594,7 @@ impl Function for Less {
         )
     }
 
-    fn backward(&mut self, _grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, _grad: &LazyBuffer) -> Grad {
         unreachable!("Less op can not do backward pass")
     }
 
@@ -642,7 +642,7 @@ impl Function for Add {
         )
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let x = if self.need_input_grad[0] {
             Some(grad.clone())
         } else {
@@ -700,14 +700,14 @@ impl Function for Sub {
         )
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let x = if self.need_input_grad[0] {
             Some(grad.clone())
         } else {
             None
         };
         let y = if self.need_input_grad[1] {
-            Some(grad.const_like(0.0).e(Binary::Sub, &[grad], None))
+            Some(grad.const_like(0.0).e(Binary::Sub, &[grad.clone()], None))
         } else {
             None
         };
@@ -760,7 +760,7 @@ impl Function for Mul {
         )
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let y = if self.need_input_grad[0] {
             Some(
                 self.y
@@ -830,7 +830,7 @@ impl Function for Div {
         )
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let x = if self.need_input_grad[0] {
             Some(grad.e(Binary::Div, &[self.y.as_ref().unwrap().clone()], None))
         } else {
@@ -905,7 +905,7 @@ impl Function for Sigmoid {
         self.ret.as_ref().unwrap().clone()
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         let ret_ref = self.ret.as_ref().unwrap();
         Grad::One(
             ret_ref
@@ -918,7 +918,7 @@ impl Function for Sigmoid {
                     )],
                     None,
                 )
-                .e(Binary::Mul, &[grad], None),
+                .e(Binary::Mul, &[grad.clone()], None),
         )
     }
 
@@ -959,14 +959,14 @@ impl Function for Relu {
         self.ret.as_ref().unwrap().clone()
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         Grad::One(
             self.ret
                 .as_ref()
                 .unwrap()
                 .const_like(0)
                 .e(Binary::Cmplt, &[self.ret.as_ref().unwrap().clone()], None)
-                .e(Binary::Mul, &[grad], None),
+                .e(Binary::Mul, &[grad.clone()], None),
         )
     }
 
@@ -1016,7 +1016,7 @@ impl Function for Where {
         )
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         // return None, \
         //        self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0)) if self.needs_input_grad[1] else None, \
         //        self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output) if self.needs_input_grad[2] else None
@@ -1072,7 +1072,7 @@ impl Function for Expand {
         x.expand(shape.expect("Expand mlops expect a shape"))
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         Grad::One(
             grad.r(
                 Reduce::Sum,
@@ -1121,7 +1121,7 @@ impl Function for Reshape {
         x.reshape(shape.expect("Reshape mlops expect a shape"))
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         Grad::One(
             grad.reshape(
                 self.input_shape
@@ -1171,7 +1171,7 @@ impl Function for Permute {
         x.permute(self.permute_order.as_ref().unwrap())
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         Grad::One(
             grad.permute(&argsort::<&[isize]>(
                 self.permute_order
@@ -1236,7 +1236,7 @@ impl Function for Pad {
         x.pad(&arg)
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         Grad::One(
             grad.shrink(
                 self.narg
@@ -1292,7 +1292,7 @@ impl Function for Shrink {
         x.shrink(&padding)
     }
 
-    fn backward(&mut self, grad: LazyBuffer) -> Grad {
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
         Grad::One(
             grad.pad(
                 self.narg

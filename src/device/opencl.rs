@@ -52,7 +52,12 @@ pub struct CLBuffer {
     dtype: Dtype,
 }
 
-#[allow(unused)]
+impl Drop for CLBuffer {
+    fn drop(&mut self) {
+        unsafe { opencl3::memory::release_mem_object(self.ptr)};
+    }
+}
+
 #[derive(Debug)]
 pub struct CLProgram {
     program: opencl3::program::Program,
@@ -173,7 +178,7 @@ impl Device for CLDevice {
             opencl3::command_queue::enqueue_write_buffer(
                 self.queue.get(),
                 dst.ptr(),
-                CL_NON_BLOCKING,
+                CL_BLOCKING,
                 0,
                 dst.size(),
                 src.as_mut_ptr() as opencl3::memory::cl_mem,
@@ -181,7 +186,6 @@ impl Device for CLDevice {
                 core::ptr::null(),
             )
             .expect("copyin failed");
-            PENDING_COPY.lock().unwrap().0.push(src);
         }
     }
 

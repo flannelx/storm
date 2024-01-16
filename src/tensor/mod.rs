@@ -69,7 +69,7 @@ impl Tensor {
             id: tensor_id(),
             dtype: buf.dtype.clone(),
             device: buf.device.clone(),
-            buffer: buf,
+            buffer: buf.into(),
         }
     }
 
@@ -87,7 +87,7 @@ impl Tensor {
             grad: Arc::new(Mutex::new(None)),
             dtype: buffer.dtype.clone(),
             device: buffer.device.clone(),
-            buffer,
+            buffer: buffer.into(),
         }
     }
 
@@ -855,11 +855,11 @@ impl Tensor {
                 .expect("t0 should have a grad")
                 .buffer
                 .clone();
-            let grads = match t0._ctx.as_mut().unwrap().backward(t0g_clone) {
+            let grads = match t0._ctx.as_mut().unwrap().backward(&t0g_clone) {
                 Grad::One(g) => vec![Some(Tensor {
                     dtype: g.dtype.clone(),
                     device: g.device.clone(),
-                    buffer: g,
+                    buffer: g.into(),
                     require_grad: false,
                     grad: Arc::default(),
                     _ctx: None,
@@ -876,7 +876,7 @@ impl Tensor {
                         Some(Tensor {
                             dtype: g.dtype.clone(),
                             device: g.device.clone(),
-                            buffer: g,
+                            buffer: g.into(),
                             require_grad: false,
                             grad: Arc::default(),
                             _ctx: None,
@@ -894,7 +894,7 @@ impl Tensor {
                         Some(Tensor {
                             dtype: g.dtype.clone(),
                             device: g.device.clone(),
-                            buffer: g,
+                            buffer: g.into(),
                             require_grad: false,
                             grad: Arc::default(),
                             _ctx: None,
