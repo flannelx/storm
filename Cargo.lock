@@ -187,6 +187,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
+name = "cudarc"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9395df0cab995685664e79cc35ad6302bf08fb9c5d82301875a183affe1278b1"
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1205,6 +1211,7 @@ name = "storm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cudarc",
  "dyn-clone",
  "float-cmp",
  "half",

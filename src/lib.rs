@@ -13,6 +13,13 @@ pub mod renderer;
 pub mod shape;
 pub mod tensor;
 
+#[derive(Debug, Clone)]
+pub struct DebugStruct(String);
+
+lazy_static::lazy_static! {
+    pub static ref DEBUG: DebugStruct = DebugStruct(std::env::var("DEBUG").unwrap_or("NO DEBUG".into()));
+}
+
 pub mod prelude {
     pub use crate::device::{prelude::*, Buffer, Device, Program};
     pub use crate::dtype::{self, Dtype};
@@ -21,4 +28,5 @@ pub mod prelude {
     pub use crate::macros::*;
     pub use crate::nn::optim::*;
     pub use crate::tensor::{Tensor, TensorDefaultType};
+    pub use crate::DEBUG;
 }

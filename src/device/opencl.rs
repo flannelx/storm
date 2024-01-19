@@ -26,29 +26,28 @@ unsafe impl Send for CLDevice {}
 unsafe impl Sync for CLDevice {}
 
 impl CLDevice {
-    pub fn new() -> Self {
-        let device_id = *get_all_devices(CL_DEVICE_TYPE_GPU)
-            .unwrap()
+    pub fn new() -> anyhow::Result<Arc<dyn Device>> {
+        let device_id = *get_all_devices(CL_DEVICE_TYPE_GPU)?
             .first()
             .expect("no device found in platform");
         let device = opencl3::device::Device::new(device_id);
         let context = Context::from_device(&device).unwrap();
         let queue = CommandQueue::create_default(&context, CL_QUEUE_PROFILING_ENABLE)
             .expect("CommandQueue::create_default failed");
-        Self {
+        Ok(Arc::new(Self {
             device_id: device_id as usize,
             device,
             context: Arc::new(context),
             queue: Arc::new(queue),
             renderer: Arc::new(CLRenderer::default()),
-        }
+        }))
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CLBuffer {
     ptr: opencl3::memory::cl_mem,
-    size: usize,
+    bytesize: usize,
     dtype: Dtype,
 }
 
@@ -106,7 +105,7 @@ impl Buffer for CLBuffer {
     }
 
     fn to_cpu(&self) -> Vec<u8> {
-        let mut dst = vec![0u8; self.size()];
+        let mut dst = vec![0u8; self.bytesize()];
         let ptr = dst.as_mut_ptr() as *mut u8;
         DEVICE.copyout(self, ptr);
         DEVICE.synchronize();
@@ -117,8 +116,8 @@ impl Buffer for CLBuffer {
         DEVICE.copyin(data, self);
     }
 
-    fn size(&self) -> usize {
-        self.size
+    fn bytesize(&self) -> usize {
+        self.bytesize
     }
 }
 
@@ -133,7 +132,7 @@ impl Device for CLDevice {
                     core::ptr::null_mut(),
                 )
                 .unwrap(),
-                size: size * dtype.size,
+                bytesize: size * dtype.size,
                 dtype,
             })
         }
@@ -164,7 +163,7 @@ impl Device for CLDevice {
                 src.ptr(),
                 CL_BLOCKING,
                 0,
-                src.size(),
+                src.bytesize(),
                 dst as opencl3::memory::cl_mem,
                 0,
                 core::ptr::null(),
@@ -180,7 +179,7 @@ impl Device for CLDevice {
                 dst.ptr(),
                 CL_BLOCKING,
                 0,
-                dst.size(),
+                dst.bytesize(),
                 src.as_mut_ptr() as opencl3::memory::cl_mem,
                 0,
                 core::ptr::null(),
@@ -191,17 +190,10 @@ impl Device for CLDevice {
 
     fn synchronize(&self) {
         opencl3::command_queue::finish(self.queue.get()).expect("Queue finish failed");
-        PENDING_COPY.lock().unwrap().0.clear();
     }
 
     fn renderer(&self) -> Arc<dyn Renderer> {
         self.renderer.clone()
-    }
-
-    fn dealloc(&self, src: &dyn Buffer) {
-        unsafe {
-            opencl3::memory::release_mem_object(src.ptr());
-        }
     }
 }
 

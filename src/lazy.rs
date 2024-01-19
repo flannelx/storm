@@ -83,12 +83,10 @@ impl DerefMut for STArc {
 #[derive(Clone)]
 pub struct LazyBuffer {
     pub lazyop: LOArc,
-    pub st: STArc,
-    pub device_buffer: Arc<Option<Arc<dyn Buffer>>>, // TODO: Does it have to be shared before realized?
+    pub st: ShapeTracker,
+    pub device_buffer: Arc<Option<Arc<dyn Buffer>>>,
     pub _base: Option<Arc<LazyBuffer>>,
     pub shape: Vec<isize>,
-    // pub children: HashSet<LazyBuffer>,
-    // pub views: HashSet<LazyBuffer>,
     pub id: LazyBufferId,
     pub dtype: Dtype,
     pub device: String,
@@ -357,15 +355,15 @@ impl LazyBuffer {
             .dtype
             .clone();
         let srcs: Vec<LazyOpSrc> = srcs
-            .iter()
+            .into_iter()
             .map(|x| {
-                if matches!(x.lazyop.optype, OpType::Binary(_))
-                    && !x.is_realized()
-                {
-                    (*x.lazyop).clone().into()
-                } else {
-                    x.clone().into()
-                }
+                // if matches!(x.lazyop.optype, OpType::Binary(_))
+                //     && !x.is_realized()
+                // {
+                //     LazyOpSrc::LazyOp(x.lazyop)
+                // } else {
+                    x.into()
+                //}
             })
             .collect();
         create_lazybuffer(
@@ -1010,7 +1008,7 @@ lazy_static::lazy_static! {
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     //TODO: Need to "copyin/out" here to avoid alloc data to new buf instead of bufs that are
     //already allocated.
-    let debug_cache = false;
+    let debug_cache = DEBUG.0 == "1";
     while !schedule.is_empty() {
         let mut si = schedule.pop_front().unwrap();
         //println!("si optype {:?}", si.ast.optype);

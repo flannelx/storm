@@ -105,7 +105,7 @@ impl Buffers {
         match self {
             Buffers::MemBuffer(b) => b.st.clone(),
             Buffers::ConstBuffer(b) => b.st.clone(),
-            Buffers::LazyBuffer(b) => (*b.st).clone(),
+            Buffers::LazyBuffer(b) => b.st.clone(),
             Buffers::LocalBuffer(b) => panic!("Local buffer does not have shapetracker {b:?}"),
         }
     }
