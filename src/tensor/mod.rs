@@ -105,10 +105,8 @@ impl Tensor {
             self.dtype(),
             std::any::type_name::<T>().split("::").last().unwrap()
         );
-        if self.buffer.device_buffer.is_none() {
-            self.realize();
-        }
-        let mut bytes = (*self.buffer.device_buffer).as_ref().unwrap().to_cpu();
+        let buffer = self.realize();
+        let mut bytes = (*buffer.buffer.device_buffer).as_ref().unwrap().to_cpu();
         let mut ret = vec![];
         for b in bytes
             .windows(std::mem::size_of::<T>())
@@ -1056,7 +1054,7 @@ impl Tensor {
 
         let yy = (y_counter
             ._eq(&y.flatten().reshape([y.shape().numel(), 1]))
-            ._where(-1.0, 1.0)
+            ._where(-1.0, 0.0)
             * loss_mark.reshape([loss_mark.shape().numel(), 1]))
         .reshape(y_rsh);
         (self.log_softmax() * yy).sum_all() / loss_mark.sum_all()
@@ -1146,7 +1144,7 @@ impl Tensor {
         self._where_(&y, &z)
     }
 
-    pub fn _where_(&self, y: &Self, z: &Self) -> Self {
+    pub fn _where_(&self, z: &Self, y: &Self) -> Self {
         let (x_, y_) = Self::_broadcast(self, y);
         let (x, z_) = Self::_broadcast(&x_, z);
         let (y, z) = Self::_broadcast_r(&y_, &z_);
@@ -1154,7 +1152,7 @@ impl Tensor {
             need_input_grad: [self.require_grad, y.require_grad, z.require_grad],
             ..Default::default()
         }
-        .apply(&x, Some(&x), Some(&y), None, None)
+        .apply(&x, Some(&y), Some(&z), None, None)
     }
 
     // def mean(self, axis=None, keepdim=False):
@@ -1179,8 +1177,11 @@ impl Tensor {
 
     pub fn realize(&self) -> Self {
         let mut seen = HashSet::new();
-        run_schedule(self.buffer.schedule(&mut seen));
         let mut ret = self.clone();
+        if matches!(ret.buffer.lazyop.optype, OpType::Movement(_)) {
+            ret = ret + 0;
+        }
+        run_schedule(ret.buffer.schedule(&mut seen));
         ret.buffer.lazyop.src.clear();
         ret.buffer.lazyop.buffers.clear();
         ret
