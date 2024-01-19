@@ -1180,7 +1180,10 @@ impl Tensor {
     pub fn realize(&self) -> Self {
         let mut seen = HashSet::new();
         run_schedule(self.buffer.schedule(&mut seen));
-        self.clone()
+        let mut ret = self.clone();
+        ret.buffer.lazyop.src.clear();
+        ret.buffer.lazyop.buffers.clear();
+        ret
     }
 
     pub fn corealize(list: Vec<Tensor>) {
