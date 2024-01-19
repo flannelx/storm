@@ -22,34 +22,29 @@ pub struct ConvNet {
     pub c1: Tensor,
     pub c2: Tensor,
     pub l1: Tensor,
-    pub l2: Tensor,
 }
 
 impl Default for ConvNet {
     fn default() -> Self {
         let conv = 3;
+        let in_ = 8;
+        let out_ = 16;
         Self {
-            c1: Tensor::scaled_uniform([32, 1, conv, conv]),
-            c2: Tensor::scaled_uniform([64, 32, conv, conv]),
-            l1: Tensor::scaled_uniform([9216, 128]),
-            l2: Tensor::scaled_uniform([128, 1]),
+            c1: Tensor::scaled_uniform([in_, 1, conv, conv]),
+            c2: Tensor::scaled_uniform([out_, in_, conv, conv]),
+            l1: Tensor::scaled_uniform([out_ * 5 * 5, 10]),
         }
     }
 }
 
 impl ConvNet {
     fn forward(&self, x: &Tensor) -> Tensor {
-        let d1 = x.shape().numel() / 28 / 28;
-        let mut y = x.reshape([d1, 1, 28, 28]);
-        y = y.conv2d(&self.c1).sigmoid();
-        y = y
-            .conv2d(&self.c2)
-            .sigmoid()
-            .flatten()
-            .reshape([-1, self.l1.shape()[0]]);
-        y = y.matmul(&self.l1).sigmoid();
-        y = y.matmul(&self.l2).sigmoid();
-        y
+        let mut x = x.reshape([-1, 1, 28, 28]);
+        x = x.conv2d(&self.c1).relu().max_pool2d();
+        x = x.conv2d(&self.c2).relu().max_pool2d();
+        x = x.reshape([x.shape()[0], -1]);
+        x = x.matmul(&self.l1).log_softmax();
+        x
     }
 
     // fn save(&self, path: &str) -> Result<(), safetensors::SafeTensorError> {
@@ -139,10 +134,9 @@ fn train<Optim: Optimizer>(
         let x = Tensor::from(&*img_batched[i]).reshape([batch_size, 1, 28, 28]);
         let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
         let out = model.forward(&x);
-        let mut loss = &out - &y;
-        loss = (&loss * &loss).mean();
+        let mut loss = out.sparse_categorical_crossentropy(&y);
+        optim.zero_grad();
         loss.backward();
-        loss.realize();
         optim.step();
         let pred = out.detach().argmax(-1);
         let accuracy = (pred._eq(&y.detach())).mean();
