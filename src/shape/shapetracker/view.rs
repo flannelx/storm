@@ -275,7 +275,11 @@ impl View {
     pub fn permute(&self, axis: &[isize]) -> Self {
         // return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None)  # noqa: E501
         let new_mask = if let Some(m) = &self.mask {
-            Some(v![m[*a as usize], for a in axis])
+            if axis.len() > m.len() {
+                None
+            } else {
+                Some(v![m[*a as usize], for a in axis])
+            }
         } else {
             None
         };

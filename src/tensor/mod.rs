@@ -637,19 +637,11 @@ impl Tensor {
         stride: Option<usize>,
         dilation: Option<usize>,
     ) -> Self {
-        let kernel_size = if kernel_size.is_some() {
-            kernel_size.unwrap()
-        } else {
-            2
-        };
-        let stride = if stride.is_some() { stride.unwrap() } else { 1 };
-        let dilation = if dilation.is_some() {
-            dilation.unwrap()
-        } else {
-            1
-        };
+        let kernel_size = kernel_size.unwrap_or(2);
+        let stride = stride.unwrap_or(2);
+        let dilation = dilation.unwrap_or(1);
         self._pool([kernel_size, kernel_size], stride, dilation)
-            ._max(&v![-(i as isize), for i in (0..2).rev()], false)
+            ._max(&v![i, for i in (-2..0)], false)
     }
 
 

@@ -23,7 +23,7 @@ impl Default for CudaRenderer {
     fn default() -> Self {
         Self {
             opts: Arc::new(LanguageOpts {
-                kernel_prefix: "extern \"C\" __global__ ".into(),
+                kernel_prefix: "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ ".into(),
                 smem_prefix: "__shared__ ".into(),
                 arg_int_prefix: "const int".into(),
                 half_prekernel: Some("#include <cuda_fp16.h>".into()),
