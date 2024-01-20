@@ -9,7 +9,7 @@ use crate::{
     shape::symbolic::NodeOp,
 };
 const DEVICES: [fn() -> anyhow::Result<Arc<dyn Device>>; 2] =
-    [cuda::CudaDevice::new, opencl::CLDevice::new];
+    [opencl::CLDevice::new, cuda::CudaDevice::new];
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = {
         let mut d = vec![];
