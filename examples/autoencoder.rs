@@ -72,38 +72,43 @@ fn main() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     canvas.set_draw_color(Color::RGB(0, 0, 0));
     canvas.present();
+    let n = 1;
     let mut i = 0;
+    if i >= img_batched.len() {
+        let mut rng = thread_rng();
+        img_batched.shuffle(&mut rng);
+        i = 0;
+    }
     let mut latent_value = 0.0f32;
+    let img = &img_batched[10057];
+    let mut input = vec![];
+    let mut y = vec![];
+    for r in 0..28 {
+        for c in 0..28 {
+            let v = img[r * 28 + c] / 255.;
+            input.extend(vec![r as f32 / 27., c as f32 / 27.]);
+            y.push(v);
+        }
+    }
+    for _ in 0..n-1 {
+        input.extend_from_within(..);
+        y.extend_from_within(..);
+    }
+    let x: Tensor = Tensor::from(&*input).reshape([28 * 28 * n, 2]);
+    let x = x.detach();
+    let y: Tensor = Tensor::from(&*y).reshape([28 * 28 * n, 1]);
+    let y = y.detach();
     'mainloop: loop {
         if train {
-            if i >= img_batched.len() {
-                let mut rng = thread_rng();
-                img_batched.shuffle(&mut rng);
-                i = 0;
-            }
             canvas.clear();
             optim.zero_grad();
-            let img = &img_batched[10057];
-            let mut input = vec![];
-            let mut y = vec![];
-            for r in 0..28 {
-                for c in 0..28 {
-                    let v = img[r * 28 + c] / 255.;
-                    input.extend(vec![r as f32 / 27., c as f32 / 27.]);
-                    y.push(v);
-                }
-            }
-            let x: Tensor = Tensor::from(&*input).reshape([28 * 28, 2]);
-            let x = x.detach();
-            let y: Tensor = Tensor::from(&*y).reshape([28 * 28, 1]);
-            let y = y.detach();
             // let y: Tensor<Cpu> =
             //     Tensor::from_shape(&*img_batched[10057], [batch_size, 28 * 28]) / 255.0;
             // let y = y.detach();
             let out = model.forward(&x);
             let out_vec = out.to_vec();
             let out_2 = &y - &out;
-            let mut loss: Tensor = (&out_2 * &out_2).sum_all() / (28 * 28);
+            let mut loss: Tensor = (&out_2 * &out_2).sum_all() / (28 * 28 * n);
             loss.backward();
             optim.step();
             for r in 0..28 {
@@ -177,10 +182,8 @@ fn main() -> Result<(), String> {
                     ]);
                 }
             }
-            let out = model.forward(&Tensor::from(
-                &*input).reshape(
-                [28 * 28 * upscale * upscale, 2],
-            ));
+            let out =
+                model.forward(&Tensor::from(&*input).reshape([28 * 28 * upscale * upscale, 2]));
             let out_vec = out.to_vec();
             for r in 0..28 * upscale {
                 for c in 0..28 * upscale {
@@ -235,14 +238,9 @@ fn main() -> Result<(), String> {
 fn fetch_mnist(
     batch_size: usize,
     shuffle: bool,
-) -> (
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-    Vec<Vec<f32>>,
-) {
-    use num_traits::FromPrimitive;
+) -> (Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>, Vec<Vec<f32>>) {
     use mnist::Mnist;
+    use num_traits::FromPrimitive;
     let mnist = Mnist::from_download().expect("mnist download failed");
     let Mnist {
         train_images,
