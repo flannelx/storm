@@ -106,7 +106,10 @@ impl Tensor {
             std::any::type_name::<T>().split("::").last().unwrap()
         );
         let buffer = self.realize();
-        let mut bytes = (*buffer.buffer.device_buffer).as_ref().unwrap().to_cpu();
+        let mut bytes = (*buffer.buffer.device_buffer)
+            .as_ref()
+            .expect("buffer not realized")
+            .to_cpu();
         let mut ret = vec![];
         for b in bytes
             .windows(std::mem::size_of::<T>())
@@ -1201,21 +1204,18 @@ impl Tensor {
     }
 
     pub fn pow<V: Into<Self>>(&self, x: V, reverse: bool) -> Self {
-        let x = x.into();
+        let x: Tensor = x.into();
         if x.is_const() && !reverse {
             let cv = x.get_const_val().unwrap();
-            match cv as isize {
-                isize::MIN..0 => {
-                    return self.reciprocal().pow(-x, false);
+            if cv < 0. {
+                return self.reciprocal().pow(-x, false);
+            }
+            if [0., 1., 2., 3.].contains(&cv) {
+                let mut acc = self.const_like(1);
+                for i in 0..cv as usize {
+                    acc = &acc * self;
                 }
-                0..=3 => {
-                    let mut acc = self.const_like(1);
-                    for i in 0..cv as usize {
-                        acc = &acc * self;
-                    }
-                    return acc;
-                }
-                _ => (),
+                return acc;
             }
             if cv == 0.5 {
                 return self.sqrt();
@@ -1228,14 +1228,14 @@ impl Tensor {
             (self * std::f32::consts::PI).cos()
         };
         let mut base_sign = if !reverse { self.sign() } else { x.sign() };
-        // if !reverse {
-        //     base_sign = base_sign - (1.5 * (1 - self.sign().abs()));
-        // } else {
-        //     base_sign = base_sign - (1.5 * (1 - x.sign().abs()));
-        // }
+        if !reverse {
+            base_sign = base_sign - (1.5 * (1 - self.sign().abs()));
+        } else {
+            base_sign = base_sign - (1.5 * (1 - x.sign().abs()));
+        }
         base_sign = (&base_sign - 1) / -2;
-        //ar.mul(&(sign * &base_sign + (1 - &base_sign)))
-        ar.mul(&(sign * &base_sign))
+        ar.mul(&(sign * &base_sign + (1 - &base_sign)))
+        //ar.mul(&(sign * &base_sign))
     }
 
     pub fn sign(&self) -> Self {

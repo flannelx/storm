@@ -30,9 +30,9 @@ pub fn adam_with<'a>(params: &[*mut Tensor], p: &[f32]) -> LAMP {
 pub struct LAMP {
     pub(crate) params: Vec<*mut Tensor>,
     pub(crate) buffers: Vec<*mut Tensor>,
-    pub(crate) lr: Tensor, // on new() will take in a float, but it will make into a tensor
-    pub(crate) b1: f32,
-    pub(crate) b2: f32,
+    pub(crate) lr: Tensor,
+    pub(crate) b1: Tensor,
+    pub(crate) b2: Tensor,
     pub(crate) eps: f32,
     pub(crate) wd: f32,
     pub(crate) adam: bool,
@@ -78,8 +78,8 @@ impl LAMP {
                 params,
                 buffers: vec![],
                 lr,
-                b1,
-                b2,
+                b1: Tensor::from([b1]),
+                b2: Tensor::from([b2]),
                 eps,
                 wd,
                 adam,
@@ -133,14 +133,14 @@ impl Optimizer for LAMP {
 
                 // self.m[i].assign(self.m[i] * self.b1 + g * (1.0 - self.b1)).realize()
                 // self.v[i].assign(self.v[i] * self.b2 + (g * g) * (1.0 - self.b2)).realize()
-                let mi = (&self.m[i] * self.b1 + &g * (1.0 - self.b1)).realize();
-                let vi = (&self.v[i] * self.b2 + (&g * &g) * (1.0 - self.b2)).realize();
+                let mi = (&self.m[i] * &self.b1 + &g * &(1.0 - &self.b1)).realize();
+                let vi = (&self.v[i] * &self.b2 + (&g * &g) * (1.0 - &self.b2)).realize();
                 self.m[i].assign(mi);
                 self.v[i].assign(vi);
                 // m_hat = self.m[i] / (1.0 - self.b1**self.t)
-                let m_hat = (&self.m[i] / &(1.0 - self.t.pow(self.b1, true)));
+                let m_hat = (&self.m[i] / &(1.0 - self.b1.pow(self.t.clone(), false)));
                 // v_hat = self.v[i] / (1.0 - self.b2**self.t)
-                let v_hat = &self.v[i] / &(1.0 - self.t.pow(self.b2, true));
+                let v_hat = &self.v[i] / &(1.0 - self.b2.pow(self.t.clone(), false));
                 // up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
                 let up = (m_hat / (v_hat.sqrt() + self.eps)) + t.detach() * self.wd;
                 let r = if !self.adam { todo!() } else { 1.0 };

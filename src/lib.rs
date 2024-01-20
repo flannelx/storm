@@ -14,10 +14,10 @@ pub mod shape;
 pub mod tensor;
 
 #[derive(Debug, Clone)]
-pub struct DebugStruct(String);
+pub struct DebugStruct(isize);
 
 lazy_static::lazy_static! {
-    pub static ref DEBUG: DebugStruct = DebugStruct(std::env::var("DEBUG").unwrap_or("NO DEBUG".into()));
+    pub static ref DEBUG: DebugStruct = DebugStruct(std::env::var("DEBUG").unwrap_or("-1".into()).parse::<isize>().unwrap_or(-1));
 }
 
 pub mod prelude {

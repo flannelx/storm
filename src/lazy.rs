@@ -362,7 +362,7 @@ impl LazyBuffer {
                 // {
                 //     LazyOpSrc::LazyOp(x.lazyop)
                 // } else {
-                    x.into()
+                x.into()
                 //}
             })
             .collect();
@@ -680,7 +680,9 @@ pub fn create_lazybuffer(
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
         let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-        //println!("{} {:?}", ret.id, ret);
+        if DEBUG.0 >= 1 {
+            println!("{} {:?}", ret.id, ret);
+        }
         return ret;
     }
     // # wop is the deduping key. i feel this used to compare more deeply
@@ -691,7 +693,9 @@ pub fn create_lazybuffer(
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
     let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-    //println!("{} {:?}", ret.id, ret);
+    if DEBUG.0 >= 1 {
+        println!("{} {:?}", ret.id, ret);
+    }
     ret
 }
 
@@ -701,7 +705,7 @@ fn _ast_reduceops(op: &LazyOp) -> LazyOp {
     if src.is_realized() {
         return ret;
     }
-    let src = if matches!(src.lazyop.optype, OpType::Binary(_))  {
+    let src = if matches!(src.lazyop.optype, OpType::Binary(_)) {
         LazyOpSrc::LazyOp(src.lazyop.clone())
     } else {
         LazyOpSrc::LazyBuffer(Arc::new(src.clone()))
@@ -755,7 +759,9 @@ fn _ast_binaryops(op: &LazyOp, shape: &[isize]) -> LazyOp {
     }
     for (k, v) in real_srcs.iter_mut() {
         if v.is_none() {
-            *v = Some(LazyOpSrc::LazyBuffer(Arc::new(k.reshape(intermediate_shape))));
+            *v = Some(LazyOpSrc::LazyBuffer(Arc::new(
+                k.reshape(intermediate_shape),
+            )));
         }
     }
     let mut tmp = HashMap::new();
@@ -1008,7 +1014,7 @@ lazy_static::lazy_static! {
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     //TODO: Need to "copyin/out" here to avoid alloc data to new buf instead of bufs that are
     //already allocated.
-    let debug_cache = DEBUG.0 == "1";
+    let debug_cache = DEBUG.0 >= 2;
     while !schedule.is_empty() {
         let mut si = schedule.pop_front().unwrap();
         //println!("si optype {:?}", si.ast.optype);
