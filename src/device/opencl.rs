@@ -51,9 +51,35 @@ pub struct CLBuffer {
     dtype: Dtype,
 }
 
+impl Buffer for CLBuffer {
+    fn ptr(&self) -> *mut core::ffi::c_void {
+        self.ptr
+    }
+
+    fn dtype(&self) -> Dtype {
+        self.dtype.clone()
+    }
+
+    fn bytesize(&self) -> usize {
+        self.bytesize
+    }
+
+    fn to_cpu(&self) -> Vec<u8> {
+        let mut dst = vec![0u8; self.bytesize()];
+        let ptr = dst.as_mut_ptr() as *mut u8;
+        DEVICE.copyout(self, ptr);
+        DEVICE.synchronize();
+        dst
+    }
+
+    fn from_cpu(&mut self, data: Vec<u8>) {
+        DEVICE.copyin(data, self);
+    }
+}
+
 impl Drop for CLBuffer {
     fn drop(&mut self) {
-        unsafe { opencl3::memory::release_mem_object(self.ptr)};
+        ALLOCTOR.0.free(&*self)
     }
 }
 
@@ -90,48 +116,41 @@ impl Program for CLProgram {
                 },
                 0,
                 std::ptr::null(),
-            ).expect("enqueue failed");
+            )
+            .expect("enqueue failed");
         }
     }
 }
 
-impl Buffer for CLBuffer {
-    fn ptr(&self) -> *mut core::ffi::c_void {
-        self.ptr
-    }
-
-    fn dtype(&self) -> Dtype {
-        self.dtype.clone()
-    }
-
-    fn to_cpu(&self) -> Vec<u8> {
-        let mut dst = vec![0u8; self.bytesize()];
-        let ptr = dst.as_mut_ptr() as *mut u8;
-        DEVICE.copyout(self, ptr);
-        DEVICE.synchronize();
-        dst
-    }
-
-    fn from_cpu(&mut self, data: Vec<u8>) {
-        DEVICE.copyin(data, self);
-    }
-
-    fn bytesize(&self) -> usize {
-        self.bytesize
-    }
-}
-
 impl Device for CLDevice {
-    fn alloc(&self, size: usize, dtype: Dtype) -> Arc<dyn Buffer> {
+    fn _alloc(&self, size: usize, dtype: Dtype) -> anyhow::Result<Arc<dyn Buffer>> {
+        unsafe {
+            let ptr = opencl3::memory::create_buffer(
+                self.context.get(),
+                CL_MEM_READ_WRITE,
+                size * dtype.size,
+                core::ptr::null_mut(),
+            );
+            if ptr.is_err() {
+                return Err(anyhow::anyhow!("{:?}", ptr));
+            }
+            Ok(Arc::new(CLBuffer {
+                ptr: ptr.unwrap(),
+                bytesize: size * dtype.size,
+                dtype,
+            }))
+        }
+    }
+
+    fn buf_from_mem_ptr(
+        &self,
+        size: usize,
+        dtype: Dtype,
+        mem: *mut std::ffi::c_void,
+    ) -> Arc<dyn Buffer> {
         unsafe {
             Arc::new(CLBuffer {
-                ptr: opencl3::memory::create_buffer(
-                    self.context.get(),
-                    CL_MEM_READ_WRITE,
-                    size * dtype.size,
-                    core::ptr::null_mut(),
-                )
-                .unwrap(),
+                ptr: mem,
                 bytesize: size * dtype.size,
                 dtype,
             })
@@ -194,6 +213,10 @@ impl Device for CLDevice {
 
     fn renderer(&self) -> Arc<dyn Renderer> {
         self.renderer.clone()
+    }
+
+    fn free(&self, ptr: *mut std::ffi::c_void) {
+        unsafe { opencl3::memory::release_mem_object(ptr) };
     }
 }
 

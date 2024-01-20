@@ -1,4 +1,4 @@
-#![feature(get_mut_unchecked, exclusive_range_pattern)]
+#![feature(get_mut_unchecked, exclusive_range_pattern, let_chains)]
 #![allow(unused)]
 
 pub mod arg;

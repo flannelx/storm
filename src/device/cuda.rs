@@ -113,10 +113,20 @@ impl CudaDevice {
 }
 
 impl Device for CudaDevice {
-    fn alloc(&self, size: usize, dtype: Dtype) -> Arc<dyn Buffer> {
+    fn _alloc(&self, size: usize, dtype: Dtype) -> anyhow::Result<Arc<dyn Buffer>> {
+        unsafe {
+            Ok(Arc::new(CudaBuffer {
+                ptr: malloc_sync(size * dtype.size)?,
+                bytesize: size * dtype.size,
+                dtype,
+            }))
+        }
+    }
+
+    fn buf_from_mem_ptr(&self, size: usize, dtype: Dtype, mem: *mut std::ffi::c_void) -> Arc<dyn Buffer> {
         unsafe {
             Arc::new(CudaBuffer {
-                ptr: malloc_sync(size * dtype.size).unwrap(),
+                ptr: mem as _,
                 bytesize: size * dtype.size,
                 dtype,
             })
@@ -167,6 +177,12 @@ impl Device for CudaDevice {
 
     fn renderer(&self) -> Arc<dyn Renderer> {
         Arc::new(CudaRenderer::default())
+    }
+
+    fn free(&self, ptr: *mut std::ffi::c_void) {
+        unsafe {
+            cuMemFree_v2(ptr as _);
+        }
     }
 }
 
