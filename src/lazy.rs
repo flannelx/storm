@@ -9,7 +9,7 @@ use rand::Rng;
 
 use crate::codegen::kernel::Buffers;
 use crate::codegen::kernel::{ConstBuffer, MemBuffer};
-use crate::dtype::least_upper_dtype;
+use crate::dtype::{least_upper_dtype, NumType};
 use crate::ops::{self, ScheduleItem};
 use crate::prelude::*;
 use crate::{
@@ -220,10 +220,10 @@ impl LazyBuffer {
         .expand(&self.shape)
     }
 
-    pub fn from_cpu<T: num_traits::ToBytes>(x: Vec<T>) -> Self {
+    pub fn from_cpu<T: NumType>(x: Vec<T>) -> Self {
         let bytes = x
             .iter()
-            .map(|x| x.to_le_bytes().as_ref().to_vec())
+            .map(|x| x._to_le_bytes())
             .collect::<Vec<Vec<u8>>>()
             .concat();
         let mut buf = DEVICE.alloc(x.len(), dtype::type_to_dtype::<T>());
@@ -560,58 +560,58 @@ impl LazyBuffer {
         if arg == &(0..arg.len()).map(|v| v as isize).collect::<Vec<isize>>() {
             return self.clone();
         }
-        if !self.is_realized() {
-            match &self.lazyop.optype {
-                OpType::Movement(m) => match m {
-                    Movement::Permute => {
-                        return self.lazyop.src[0].clone().lb_mut().permute(
-                            &self
-                                .lazyop
-                                .args
-                                .iter()
-                                .map(|v| v.to_idx())
-                                .collect::<Vec<isize>>(),
-                        )
-                    }
-                    Movement::Expand => {
-                        return self.lazyop.src[0].lb().permute(arg).expand(
-                            &arg.iter()
-                                .map(|i| self.lazyop.args[*i as usize].to_idx())
-                                .collect::<Vec<isize>>(),
-                        );
-                    }
-                    Movement::Reshape if matches!(self.lazyop.src[0], LazyOpSrc::LazyBuffer(_)) => {
-                        if let Some(shape_idx_groups) =
-                            get_contraction(&self.lazyop.src[0].lb().shape, &self.shape)
-                        {
-                            //self.lazyop.clone().src[0].lb_mut().children.remove(self);
-                            return self.lazyop.src[0]
-                                .lb()
-                                .permute(
-                                    &arg.iter()
-                                        .map(|&i| shape_idx_groups[i as usize].clone())
-                                        .collect::<Vec<Vec<isize>>>()
-                                        .concat(),
-                                )
-                                .reshape(&self.st.permute(arg).shape());
-                        }
-                    }
-                    _ => (),
-                },
-                OpType::Reduce(_) => {
-                    let arg_shape = self.lazyop.args[0].to_shape();
-                    let narg = arg
-                        .iter()
-                        .map(|i| arg_shape[*i as usize])
-                        .collect::<Vec<isize>>();
-                    let mut src = self.lazyop.src[0].clone();
-                    let optype = &self.lazyop.optype;
-                    //src.lb_mut().children.remove(self);
-                    return src.lb().permute(arg).r(optype.clone(), &narg);
-                }
-                t => (),
-            };
-        }
+        // if !self.is_realized() {
+        //     match &self.lazyop.optype {
+        //         OpType::Movement(m) => match m {
+        //             Movement::Permute => {
+        //                 return self.lazyop.src[0].clone().lb_mut().permute(
+        //                     &self
+        //                         .lazyop
+        //                         .args
+        //                         .iter()
+        //                         .map(|v| v.to_idx())
+        //                         .collect::<Vec<isize>>(),
+        //                 )
+        //             }
+        //             Movement::Expand => {
+        //                 return self.lazyop.src[0].lb().permute(arg).expand(
+        //                     &arg.iter()
+        //                         .map(|i| self.lazyop.args[*i as usize].to_idx())
+        //                         .collect::<Vec<isize>>(),
+        //                 );
+        //             }
+        //             Movement::Reshape if matches!(self.lazyop.src[0], LazyOpSrc::LazyBuffer(_)) => {
+        //                 if let Some(shape_idx_groups) =
+        //                     get_contraction(&self.lazyop.src[0].lb().shape, &self.shape)
+        //                 {
+        //                     //self.lazyop.clone().src[0].lb_mut().children.remove(self);
+        //                     return self.lazyop.src[0]
+        //                         .lb()
+        //                         .permute(
+        //                             &arg.iter()
+        //                                 .map(|&i| shape_idx_groups[i as usize].clone())
+        //                                 .collect::<Vec<Vec<isize>>>()
+        //                                 .concat(),
+        //                         )
+        //                         .reshape(&self.st.permute(arg).shape());
+        //                 }
+        //             }
+        //             _ => (),
+        //         },
+        //         OpType::Reduce(_) => {
+        //             let arg_shape = self.lazyop.args[0].to_shape();
+        //             let narg = arg
+        //                 .iter()
+        //                 .map(|i| arg_shape[*i as usize])
+        //                 .collect::<Vec<isize>>();
+        //             let mut src = self.lazyop.src[0].clone();
+        //             let optype = &self.lazyop.optype;
+        //             //src.lb_mut().children.remove(self);
+        //             return src.lb().permute(arg).r(optype.clone(), &narg);
+        //         }
+        //         t => (),
+        //     };
+        // }
         self._movement_op(
             self.st.permute(arg),
             OpType::Movement(Movement::Permute),
@@ -680,7 +680,7 @@ pub fn create_lazybuffer(
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
         let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-        if DEBUG.0 >= 1 {
+        if DEBUG.0.contains("LB") {
             println!("{} {:?}", ret.id, ret);
         }
         return ret;
@@ -693,7 +693,7 @@ pub fn create_lazybuffer(
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
     let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
-    if DEBUG.0 >= 1 {
+    if DEBUG.0.contains("LB") {
         println!("{} {:?}", ret.id, ret);
     }
     ret
@@ -999,6 +999,7 @@ pub fn _replace_bufferops(op: LazyOp) -> (LazyOp, Vec<LazyBuffer>) {
 
 #[derive(Debug, Clone)]
 pub struct KernelCache {
+    prg_str: String,
     prg: Arc<dyn Program>,
     global_size: Vec<usize>,
     local_size: Vec<usize>,
@@ -1014,7 +1015,7 @@ lazy_static::lazy_static! {
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     //TODO: Need to "copyin/out" here to avoid alloc data to new buf instead of bufs that are
     //already allocated.
-    let debug_cache = DEBUG.0 >= 2;
+    let debug_cache = DEBUG.0.contains("CACHE");
     while !schedule.is_empty() {
         let mut si = schedule.pop_front().unwrap();
         //println!("si optype {:?}", si.ast.optype);
@@ -1050,6 +1051,9 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
             if debug_cache {
                 println!("\ncached hit");
             }
+            if DEBUG.0.contains("KERNEL") {
+                println!("{}", kernel.prg_str);
+            }
             kernel.prg.run(
                 &bufs,
                 kernel.global_size.as_ref(),
@@ -1073,15 +1077,18 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                 vec![]
             };
             let (name, prg_str) = DEVICE.render(lin);
+            if DEBUG.0.contains("KERNEL") {
+                println!("{prg_str}");
+            }
             if debug_cache {
                 println!("\nzero hit");
-                println!("{prg_str}");
             }
             let prg = DEVICE.build(&name, &prg_str);
             prg.run(&bufs, &global_size, Some(&local_size), &[], &[]);
             KERNEL_CACHED.lock().unwrap().insert(
                 format!("{:?}", si),
                 KernelCache {
+                    prg_str,
                     prg,
                     global_size: global_size.clone(),
                     local_size: local_size.clone(),

@@ -3,6 +3,7 @@ use rand::thread_rng;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use storm::prelude::*;
+use storm::nn::*;
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -10,24 +11,27 @@ use sdl2::keyboard::Keycode;
 const SCALE: u32 = 8;
 
 struct AE {
-    l1: Tensor,
-    l2: Tensor,
-    l3: Tensor,
+    l1: Linear,
+    l2: Linear,
+    l3: Linear,
+    l4: Linear,
 }
 
 impl AE {
     pub fn new() -> Self {
         Self {
-            l1: Tensor::uniform([2, 7]),
-            l2: Tensor::uniform([7, 2]),
-            l3: Tensor::uniform([2, 1]),
+            l1: Linear::new(2, 128, None),
+            l2: Linear::new(128, 64, None),
+            l3: Linear::new(64, 32, None),
+            l4: Linear::new(32, 1, None),
         }
     }
 
     pub fn forward(&self, x: &Tensor) -> Tensor {
-        let mut x = x.matmul(&self.l1).sigmoid();
-        x = x.matmul(&self.l2).sigmoid();
-        x = x.matmul(&self.l3).sigmoid();
+        let mut x = self.l1.call(x).sigmoid();
+        x = self.l2.call(&x).sigmoid();
+        x = self.l3.call(&x).sigmoid();
+        x = self.l4.call(&x).sigmoid();
         x
     }
 
@@ -55,7 +59,7 @@ fn main() -> Result<(), String> {
     // if load {
     //     model.load(model_path).unwrap();
     // }
-    let mut optim = adam(&[&mut model.l1, &mut model.l2, &mut model.l3], 0.005);
+    let mut optim = adam(&[&mut model.l1.weights, &mut model.l2.weights, &mut model.l3.weights, &mut model.l4.weights], 0.001);
     let batch_size = 1;
     let (mut img_batched, _, _, _) = fetch_mnist(batch_size, false);
     let sdl_context = sdl2::init()?;
@@ -108,7 +112,7 @@ fn main() -> Result<(), String> {
             let out = model.forward(&x);
             let out_vec = out.to_vec();
             let out_2 = &y - &out;
-            let mut loss: Tensor = (&out_2 * &out_2).sum_all() / (28 * 28 * n);
+            let mut loss: Tensor = (&out_2 * &out_2).sum([], false) / (28 * 28 * n);
             loss.backward();
             optim.step();
             for r in 0..28 {

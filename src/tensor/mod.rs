@@ -2,6 +2,8 @@ pub mod core_ops;
 pub mod mlops;
 pub mod shape;
 use half::f16;
+use ndarray::ArrayD;
+use num_traits::AsPrimitive;
 use num_traits::One;
 use num_traits::Zero;
 
@@ -23,7 +25,7 @@ use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-pub type TensorDefaultType = f32;
+pub type TensorDefaultType = f16;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub struct TensorId(pub(crate) usize);
@@ -73,8 +75,8 @@ impl Tensor {
         }
     }
 
-    pub fn from<V: Into<Vec<TensorDefaultType>>>(data: V) -> Self {
-        let data = data.into();
+    pub fn from<E: dtype::NumType, V: Into<Vec<E>>>(data: V) -> Self {
+        let data = data.into().into_iter().map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()) ).collect::<Vec<TensorDefaultType>>();
         let buffer = if data.len() == 1 {
             LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>(), "GPU")
         } else {
@@ -150,12 +152,13 @@ impl Tensor {
         ))
     }
 
-    pub fn empty<S: Into<Shape>>(shape: S, dtype: Dtype) -> Self {
+    pub fn empty<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
         assert!(
             shape.dims.iter().any(|n| *n >= 0),
             "load op can not infer dim"
         );
+        let dtype = crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>());
         Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None, None)
     }
 
@@ -240,20 +243,24 @@ impl Tensor {
             * (6.0 / (shape[0] + shape.dims[1..].iter().product::<isize>()) as f32).powf(0.5)
     }
 
-    pub fn kaiming_uniform<S: Into<Shape>>(_shape: S) -> Self {
+    pub fn kaiming_uniform<S: Into<Shape>>(shape: S, a: Option<f32>) -> Self {
+        let a = a.unwrap_or(0.01);
+        let shape = shape.into();
+        let bound = 3.0f32.sqrt() * (2.0 / (1. + a * a)).sqrt()
+            / (shape.dims[1..].iter().product::<isize>() as f32).sqrt();
+        Tensor::uniform_range(shape, -bound, bound)
+    }
+
+    pub fn kaiming_normal<S: Into<Shape>>(shape: S) -> Self {
         todo!()
     }
 
-    pub fn kaiming_normal<S: Into<Shape>>(_shape: S) -> Self {
-        todo!()
-    }
-
-    pub fn dropout(self, p: Option<f32>) -> Self {
+    pub fn dropout(&self, p: Option<f32>) -> Self {
         // mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(dtypes.bool)
         // return self * mask * (1/(1.0 - p))
         let p = if p.is_some() { p.unwrap() } else { 0.2 };
         let mask = Self::rand(self.shape())._ge(&Tensor::from([p]));
-        self * mask * (1.0 / (1.0 - p))
+        self * &mask * (1.0 / (1.0 - p))
     }
 
     // ------------ Movement
@@ -385,9 +392,9 @@ impl Tensor {
     }
 
     pub fn _softmax(&self, axis: isize) -> (Self, Self, Self) {
-        let m = self - &self.max_keepdim(axis);
+        let m = self - &self.max([axis], true);
         let e = m.exp();
-        let ss = e.sum_keepdim(axis);
+        let ss = e.sum([axis], true);
         (m, e, ss)
     }
 
@@ -421,24 +428,12 @@ impl Tensor {
         self.sin() / self.cos()
     }
 
-    pub fn _sum(&self, axis: Vec<isize>, keepdim: bool) -> Self {
+    pub fn sum<S: Into<Vec<isize>>>(&self, axis: S, keepdim: bool) -> Self {
+        let mut axis = axis.into();
+        if axis.len() == 0 {
+            axis = (0..self.shape().len() as isize).collect::<Vec<isize>>();
+        }
         self._reduce(Sum::default(), axis, keepdim)
-    }
-
-    pub fn sum_keepdim(&self, axis: isize) -> Self {
-        self._reduce(Sum::default(), [axis].to_vec(), true)
-    }
-
-    pub fn sum(&self, axis: isize) -> Self {
-        self._reduce(Sum::default(), [axis].to_vec(), false)
-    }
-
-    pub fn sum_all(&self) -> Self {
-        self._reduce(
-            Sum::default(),
-            v![i as isize, for i in 0..self.shape().len()],
-            false,
-        )
     }
 
     pub fn _reduce<F: 'static + Function>(
@@ -483,35 +478,23 @@ impl Tensor {
         self.shape().len()
     }
 
-    pub fn _max(&self, axis: &[isize], keepdim: bool) -> Self {
-        self._reduce(Max::default(), axis.to_vec(), keepdim)
-    }
-
-    pub fn max(&self, axis: isize) -> Self {
-        self._reduce(Max::default(), [axis].to_vec(), false)
-    }
-
-    pub fn max_keepdim(&self, axis: isize) -> Self {
-        self._reduce(Max::default(), [axis].to_vec(), true)
-    }
-
-    pub fn max_all(&self) -> Self {
-        self._reduce(
-            Max::default(),
-            v![i as isize, for i in 0..self.shape().len()],
-            false,
-        )
+    pub fn max<S: Into<Vec<isize>>>(&self, axis: S, keepdim: bool) -> Self {
+        let mut axis = axis.into();
+        if axis.len() == 0 {
+            axis = (0..self.shape().len() as isize).collect::<Vec<isize>>();
+        }
+        self._reduce(Max::default(), axis, keepdim)
     }
 
     pub fn _argmax(&self, axis: Option<isize>, keepdim: bool) -> Self {
         if axis.is_none() {
-            let idx = (self._eq(&self.max_all()))
+            let idx = (self._eq(&self.max([], false)))
                 * Self::_arange(self.numel() as f32 - 1., -1., -1.).reshape(self.shape());
-            return self.numel() as isize - idx.max_all() - 1;
+            return self.numel() as isize - idx.max([], false) - 1;
         }
         let mut axis = axis.unwrap();
         axis = axis + if axis < 0 { self.ndim() as isize } else { axis };
-        let m = self._eq(&self.max_keepdim(axis));
+        let m = self._eq(&self.max([axis], true));
         let idx = m * Self::_arange(self.shape()[axis as usize] as f32 - 1., -1., -1.).reshape(
             [
                 vec![self.shape()[axis]],
@@ -520,9 +503,9 @@ impl Tensor {
             .concat(),
         );
         if keepdim {
-            return self.shape()[axis] - idx.max_keepdim(axis) - 1;
+            return self.shape()[axis] - idx.max([axis], true) - 1;
         }
-        self.shape()[axis] - idx.max(axis) - 1
+        self.shape()[axis] - idx.max([axis], false) - 1
     }
 
     pub fn argmax(&self, axis: isize) -> Self {
@@ -564,7 +547,7 @@ impl Tensor {
         w_reshape.extend_from_slice(&vec![1; (n1 - 1).min(n2 - 1).min(1)]);
         w_reshape.extend_from_slice(&w.shape().dims[n2 - (n2.min(2))..]);
         let w = w.reshape(w_reshape).transpose(-1, -(n2.min(2) as isize));
-        (x * w).sum(-1)
+        (x * w).sum([-1], false)
     }
 
     pub fn _broadcast_r(x: &Self, y: &Self) -> (Self, Self) {
@@ -644,7 +627,7 @@ impl Tensor {
         let stride = stride.unwrap_or(2);
         let dilation = dilation.unwrap_or(1);
         self._pool([kernel_size, kernel_size], stride, dilation)
-            ._max(&v![i, for i in (-2..0)], false)
+            .max(v![i, for i in (-2..0)], false)
     }
 
 
@@ -794,7 +777,7 @@ impl Tensor {
              .expand(vec![vec![bs, groups, cin, rcout], oyx.clone(), hw.clone()].concat())
              .permute(vec![vec![0,1,3], v![4+i, for i in 0..oyx.len()], vec![2], v![4+oyx.len()+i, for i in 0..hw.len()]].concat());
         // ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
-        x = (x*weight.reshape(vec![vec![1, groups, rcout], vec![1;oyx.len()], vec![cin], hw.clone()].concat()))._sum(v![-1-i as isize, for i in 0..1+oyx.len()], true).reshape(vec![vec![bs, cout], oyx.clone()].concat());
+        x = (x*weight.reshape(vec![vec![1, groups, rcout], vec![1;oyx.len()], vec![cin], hw.clone()].concat())).sum(v![-1-i as isize, for i in 0..1+oyx.len()], true).reshape(vec![vec![bs, cout], oyx.clone()].concat());
 
         if let Some(bias) = bias {
             // bias.reshape(1, -1, *[1] * len(HW))
@@ -1031,7 +1014,7 @@ impl Tensor {
         self.transpose(axis, -1)
             .pad2d([self.shape()[axis] as usize - 1, 0], 0)
             ._pool([self.shape()[axis]], 1, 1)
-            .sum(-1)
+            .sum([-1], false)
             .transpose(axis, -1)
     }
 
@@ -1052,20 +1035,11 @@ impl Tensor {
             ._where(-1.0, 0.0)
             * loss_mark.reshape([loss_mark.shape().numel(), 1]))
         .reshape(y_rsh);
-        (self.log_softmax() * yy).sum_all() / loss_mark.sum_all()
+        (self.log_softmax() * yy).sum([], false) / loss_mark.sum([], false)
     }
 
-    pub fn bceloss(&self, y: &Self) -> Self {
-        let epsilon = 1e-9f32;
-        let num_example = if self.shape().dims.len() == 0 {
-            self.shape().dims[0] as f32
-        } else {
-            1 as f32
-        };
-        let entrophy =
-            (self * &(y * epsilon).log() + ((1f32 - self) * (1f32 - y + epsilon).log())).sum_all();
-
-        (-1f32 / num_example) * entrophy
+    pub fn bce(&self, y: &Self) -> Self {
+        (-y * self.log() - (1 - y) * (1 - self).log()).mean([], false)
     }
 
     pub fn clip(&self, min: f32, max: f32) -> Self {
@@ -1153,8 +1127,8 @@ impl Tensor {
     // def mean(self, axis=None, keepdim=False):
     //   out = self.sum(axis=axis, keepdim=keepdim)
     //   return out * (math.prod(out.shape)/math.prod(self.shape))
-    pub fn mean(&self) -> Self {
-        let out = self.sum_all();
+    pub fn mean<S: Into<Vec<isize>>>(&self, axis: S, keepdim: bool) -> Self {
+        let out = self.sum(axis, keepdim);
         if self.shape().dims.contains(&0) {
             return out;
         }
@@ -1206,7 +1180,7 @@ impl Tensor {
     pub fn pow<V: Into<Self>>(&self, x: V, reverse: bool) -> Self {
         let x: Tensor = x.into();
         if x.is_const() && !reverse {
-            let cv = x.get_const_val().unwrap();
+            let cv = x.get_const_val().unwrap().as_();
             if cv < 0. {
                 return self.reciprocal().pow(-x, false);
             }
@@ -1260,5 +1234,180 @@ impl Tensor {
         Ok(self.buffer.lazyop.args[0]
             .to_str()
             .parse::<TensorDefaultType>()?)
+    }
+
+    pub fn linear(&self, weight: &Tensor, bias: Option<&Tensor>) -> Tensor {
+        let x = if weight.shape().len() == 1 {
+            self.mul(weight)
+        } else {
+            self.matmul(weight)
+        };
+        if let Some(b) = bias {
+            x.add(b)
+        } else {
+            x
+        }
+    }
+
+    pub fn layernorm(&self, axis: Option<Vec<isize>>, eps: Option<f32>) -> Self {
+        let axis = axis.unwrap_or(vec![-1]);
+        let eps = eps.unwrap_or(1e-5);
+        let y = (self - &self.mean(axis.clone(), true));
+        y.mul(&((&y * &y).mean(axis, true) + eps).rsqrt())
+    }
+
+    pub fn scaled_dot_product_attention(
+        &self,
+        key: &Tensor,
+        value: &Tensor,
+        mut attn_mask: Option<Tensor>,
+        dropout_p: Option<f32>,
+        is_causal: Option<bool>,
+    ) -> Tensor {
+        let dropout_p = dropout_p.unwrap_or(0.0);
+        let is_causal = is_causal.unwrap_or(false);
+        if is_causal {
+            attn_mask = Some(Tensor::ones([self.shape()[-1], key.shape()[-2]]).tril(Some(0)))
+        }
+        if let Some(am) = attn_mask.as_mut() {
+            *am = (am._eq(&Tensor::_const(0))._where(-f32::INFINITY, 0.0));
+        }
+        let qk = self.matmul(&key.transpose(-2, -1)) / (self.shape()[-1] as f32).sqrt();
+        (if let Some(am) = attn_mask {
+            qk + am
+        } else {
+            qk
+        })
+        .softmax()
+        .dropout(Some(dropout_p))
+        .matmul(&value)
+    }
+
+    pub fn _tri(r: isize, c: isize, k: Option<isize>) -> Self {
+        let k = k.unwrap_or(0);
+        Tensor::arange(r as f32).unsqueeze(1).expand([r, c])._le(
+            &Tensor::_arange(-k as f32, (c - k) as f32, 1.)
+                .unsqueeze(0)
+                .expand([r, c]),
+        )
+    }
+
+    pub fn tril(&self, k: Option<isize>) -> Self {
+        let k = k.unwrap_or(0);
+        Self::_tri(self.shape()[-2], self.shape()[-1], Some(k + 1))
+            ._where_(&Tensor::_const(0), &self)
+    }
+
+    pub fn swish(&self) -> Self {
+        self * &self.sigmoid()
+    }
+
+    pub fn silu(&self) -> Self {
+        self.swish()
+    }
+
+    pub fn nd(&self) -> ArrayD<TensorDefaultType> {
+        ArrayD::from_shape_vec(
+            self.shape()
+                .dims
+                .iter()
+                .map(|&s| s as usize)
+                .collect::<Vec<usize>>(),
+            self.to_vec(),
+        )
+        .unwrap()
+    }
+
+    pub fn index<I: Into<IndexRange>, V: Into<Vec<I>>>(&self, idxs: V) -> Tensor {
+        todo!()
+    }
+
+    pub fn chunk(&self, num_chunks: usize, dim: Option<isize>) -> Vec<Tensor> {
+        let shape = self.shape();
+        let mut dim = dim.unwrap_or(0);
+        dim = if dim < 0 {
+            dim + self.shape().len() as isize
+        } else {
+            dim
+        };
+        let dim = dim as usize;
+        let chunk_size = (shape[dim] as f32 / num_chunks as f32).ceil() as usize;
+        let step = (shape[dim] as f32 / chunk_size as f32).ceil() as usize;
+        let mut ret = vec![];
+        let mut slice_params = v![(0, *d as usize), for d in shape.dims.iter()];
+        for i in 0..step {
+            slice_params[dim] = (i * chunk_size, (i + 1) * chunk_size);
+            if slice_params[dim].1 > shape[dim] as usize {
+                slice_params[dim].1 = shape[dim] as usize;
+            }
+            ret.push(self.shrink(slice_params.clone()))
+        }
+        ret
+    }
+
+    pub fn gelu(&self) -> Tensor {
+        0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
+    }
+
+    pub fn cat(&self, args: &[Tensor], dim: Option<isize>) -> Tensor {
+        let dim = dim.unwrap_or(0);
+        let dim = (if dim < 0 {
+            dim + self.ndim() as isize
+        } else {
+            dim
+        }) as usize;
+        let mut catargs = vec![self.clone()];
+        catargs.extend_from_slice(args);
+        let cat_dims = v![s.shape()[dim], for s in catargs.iter()];
+        let cat_dim_cumsum = vec![
+            vec![0],
+            cat_dims
+                .iter()
+                .scan(0, |acc, &x| {
+                    *acc += x;
+                    Some(*acc as usize)
+                })
+                .collect::<Vec<usize>>(),
+        ]
+        .concat();
+        let mut slc = v![v![(0, 0), for _ in 0..self.shape().len()], for _ in 0..catargs.len()];
+        for ((d, k), s) in cat_dims
+            .iter()
+            .zip(cat_dim_cumsum[..cat_dim_cumsum.len() - 1].iter())
+            .zip(slc.iter_mut())
+        {
+            s[dim] = (
+                *k,
+                (*cat_dim_cumsum.last().unwrap() as isize - *k as isize - *d) as usize,
+            );
+        }
+        let mut acc = catargs[0].pad(slc[0].clone(), 0);
+        for (t, p) in catargs.iter().zip(slc.iter()).skip(1) {
+            acc = acc + t.pad(p.clone(), 0);
+        }
+        acc
+    }
+}
+
+pub enum IndexRange {
+    RangeFull,
+    Range(std::ops::Range<usize>),
+    Isize(isize),
+}
+
+impl From<isize> for IndexRange {
+    fn from(value: isize) -> Self {
+        IndexRange::Isize(value)
+    }
+}
+impl From<std::ops::RangeFull> for IndexRange {
+    fn from(value: std::ops::RangeFull) -> Self {
+        IndexRange::RangeFull
+    }
+}
+
+impl From<std::ops::Range<usize>> for IndexRange {
+    fn from(value: std::ops::Range<usize>) -> Self {
+        IndexRange::Range(value)
     }
 }

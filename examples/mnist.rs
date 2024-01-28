@@ -2,7 +2,7 @@ use kdam::{tqdm, BarExt};
 use num_traits::FromPrimitive;
 use rand::{seq::SliceRandom, thread_rng};
 use storm::{
-    nn::optim::{adam, Optimizer},
+    nn::*,
     prelude::*,
 };
 
@@ -10,7 +10,7 @@ pub fn main() {
     let training = true;
     let mut model = ConvNet::default();
     if training {
-        let optim = adam(&[&mut model.c1, &mut model.c2, &mut model.l1], 0.001);
+        let optim = adam(&[&mut model.c1.weights, &mut model.c2.weights, &mut model.l1.weights], 0.001);
         let batch_size = 128;
         train(&model, optim, batch_size, 60000 / batch_size).unwrap();
     } else {
@@ -19,9 +19,9 @@ pub fn main() {
 }
 
 pub struct ConvNet {
-    pub c1: Tensor,
-    pub c2: Tensor,
-    pub l1: Tensor,
+    pub c1: Conv2d,
+    pub c2: Conv2d,
+    pub l1: Linear,
 }
 
 impl Default for ConvNet {
@@ -30,9 +30,9 @@ impl Default for ConvNet {
         let in_ = 8;
         let out_ = 16;
         Self {
-            c1: Tensor::scaled_uniform([in_, 1, conv, conv]),
-            c2: Tensor::scaled_uniform([out_, in_, conv, conv]),
-            l1: Tensor::scaled_uniform([out_ * 5 * 5, 10]),
+            c1: Conv2d::default(1, in_, conv),
+            c2: Conv2d::default(in_, out_, conv),
+            l1: Linear::new(out_ * 5 * 5, 10, None),
         }
     }
 }
@@ -40,10 +40,10 @@ impl Default for ConvNet {
 impl ConvNet {
     fn forward(&self, x: &Tensor) -> Tensor {
         let mut x = x.reshape([-1, 1, 28, 28]);
-        x = x.conv2d(&self.c1).relu().max_pool2d();
-        x = x.conv2d(&self.c2).relu().max_pool2d();
+        x = self.c1.call(&x).relu().max_pool2d();
+        x = self.c2.call(&x).relu().max_pool2d();
         x = x.reshape([x.shape()[0], -1]);
-        x = x.matmul(&self.l1).log_softmax();
+        x = self.l1.call(&x).log_softmax();
         x
     }
 
@@ -134,12 +134,12 @@ fn train<Optim: Optimizer>(
         let x = Tensor::from(&*img_batched[i]).reshape([batch_size, 1, 28, 28]);
         let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
         let out = model.forward(&x);
-        let mut loss = out.sparse_categorical_crossentropy(&y);
+        let mut loss = out.sparse_categorical_crossentropy(&y) / batch_size as f32;
         optim.zero_grad();
         loss.backward();
         optim.step();
         let pred = out.detach().argmax(-1);
-        let accuracy = (pred._eq(&y.detach())).mean();
+        let accuracy = (pred._eq(&y.detach())).mean([], false);
         pb.set_description(format!(
             "loss: {:.2?} accuracy {:.2?}",
             loss.to_vec()[0],
@@ -161,7 +161,7 @@ fn eval(model: &ConvNet) -> Result<(), Box<dyn std::error::Error>> {
         let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
         let out = model.forward(&x);
         let pred = out.detach().argmax(-1);
-        let accuracy = (pred._eq(&y.detach())).mean();
+        let accuracy = (pred._eq(&y.detach())).mean([], false);
         pb.set_description(format!("eval accuracy {:.2?}", accuracy.to_vec()[0]));
         pb.update(1)?;
     }

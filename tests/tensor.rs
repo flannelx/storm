@@ -1,4 +1,4 @@
-use storm::prelude::*;
+use storm::{prelude::*, nn::Conv2d};
 
 #[test]
 fn sum_axis() {
@@ -10,7 +10,7 @@ fn sum_axis() {
             .collect::<Vec<f32>>(),
     )
     .reshape([2, 3]);
-    let y = t.sum(1);
+    let y = t.sum([1], false);
     assert!(vec![6.0f32, 15.0f32] == y.to_vec());
 
     let n = 4 * 2 * 3 * 3;
@@ -21,7 +21,7 @@ fn sum_axis() {
     )
     .reshape([4, 2, 3, 3]);
 
-    let y = t.sum(0);
+    let y = t.sum([0], false);
     assert!(
         vec![
             112., 116., 120., 124., 128., 132., 136., 140., 144., 148., 152., 156., 160., 164.,
@@ -29,7 +29,7 @@ fn sum_axis() {
         ] == y.to_vec()
     );
 
-    let y = t.sum(1);
+    let y = t.sum([1], false);
     assert!(
         vec![
             11., 13., 15., 17., 19., 21., 23., 25., 27., 47., 49., 51., 53., 55., 57., 59., 61.,
@@ -38,7 +38,7 @@ fn sum_axis() {
         ] == y.to_vec()
     );
 
-    let y = t.sum(2);
+    let y = t.sum([2], false);
     assert!(
         vec![
             12., 15., 18., 39., 42., 45., 66., 69., 72., 93., 96., 99., 120., 123., 126., 147.,
@@ -46,7 +46,7 @@ fn sum_axis() {
         ] == y.to_vec()
     );
 
-    let y = t.sum(3);
+    let y = t.sum([3], false);
     assert!(
         vec![
             6., 15., 24., 33., 42., 51., 60., 69., 78., 87., 96., 105., 114., 123., 132., 141.,
@@ -55,7 +55,7 @@ fn sum_axis() {
     );
 
     let a = Tensor::from([2., 2., 2.]);
-    assert!(vec![6.] == a.sum_all().to_vec())
+    assert!(vec![6.] == a.sum([], false).to_vec())
 }
 
 #[test]
@@ -188,6 +188,10 @@ fn conv2d() {
         ] == r,
         "{r:?}"
     );
+
+    let a = Conv2d::new(cin, cout, conv, None, [0], None, None, None);
+    let t = Tensor::randn([1,3,28,28]);
+    assert!(a.call(&t).to_vec() == t.conv2d(&a.weights).to_vec())
 }
 
 // macro_rules! close_to_literal {
@@ -255,7 +259,7 @@ fn max_test() {
     )
     .reshape([3 * 3 * 3])
     .reshape([3, 3, 3]);
-    let y = (x * -1.0f32).max_all().to_vec();
+    let y = (x * -1.0f32).max([], false).to_vec();
     assert_eq!(y, [-1.0]);
 }
 

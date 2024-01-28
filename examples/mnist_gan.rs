@@ -51,8 +51,8 @@ pub fn main() {
                     disc_optim.zero_grad();
                     let output_real = discriminator.forward(&real_data);
                     let output_fake = discriminator.forward(&fake_data);
-                    let mut loss_real = (output_real * real_labels).mean();
-                    let mut loss_fake = (output_fake * fake_labels).mean();
+                    let mut loss_real = (output_real * real_labels).mean([], false);
+                    let mut loss_fake = (output_fake * fake_labels).mean([], false);
                     loss_real.backward();
                     loss_fake.backward();
                     disc_optim.step();
@@ -64,7 +64,7 @@ pub fn main() {
                 let noise = Tensor::randn([batch_size, 128]);
                 let fake_data = generator.forward(&noise);
                 let out = discriminator.forward(&fake_data);
-                let mut loss = (out * real_labels).mean();
+                let mut loss = (out * real_labels).mean([], false);
                 loss.backward();
                 gen_optim.step();
                 loss_g = loss_g + loss.to_vec()[0];

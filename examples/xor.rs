@@ -28,7 +28,7 @@ fn main() {
         let out = model.forward(&x);
         //println!("{:?}", out.to_vec());
         let mut loss = &y - &out;
-        loss = (&loss * &loss).mean() / loss.numel() as isize;
+        loss = (&loss * &loss).mean([], false) / loss.numel() as isize;
         optim.zero_grad();
         loss.backward();
         optim.step();

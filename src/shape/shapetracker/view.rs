@@ -157,11 +157,15 @@ impl View {
     pub fn expand(&self, new_shape: &[isize]) -> Self {
         assert!(new_shape.len() == self.shape.len());
         if self.shape.contains(&0) {
-            assert!(self
-                .shape
-                .iter()
-                .zip(new_shape.iter().zip(self.strides.iter()))
-                .all(|(&s, (&x, &st))| (s == x && x == 0) || (s > 0 && (x % s) == 0)));
+            assert!(
+                self.shape
+                    .iter()
+                    .zip(new_shape.iter().zip(self.strides.iter()))
+                    .all(|(&s, (&x, &st))| (s == x && x == 0) || (s > 0 && (x % s) == 0)),
+                "cant expand {:?} to {:?}",
+                self.shape,
+                new_shape,
+            );
             return view!(new_shape);
         }
         assert!(
@@ -169,10 +173,9 @@ impl View {
                 .iter()
                 .zip(new_shape.iter().zip(self.strides.iter()))
                 .all(|(&s, (&x, &st))| s == x || (s == 1 && st == 0)),
-            "{:?} {:?} {:?}",
+            "cant expand {:?} to {:?}",
             self.shape,
             new_shape,
-            self.strides
         );
         let mask = if let Some(m) = &self.mask {
             Some(

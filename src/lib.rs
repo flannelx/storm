@@ -1,6 +1,8 @@
 #![feature(get_mut_unchecked, exclusive_range_pattern, let_chains)]
 #![allow(unused)]
 
+use std::collections::HashSet;
+
 pub mod arg;
 pub mod codegen;
 pub mod device;
@@ -14,10 +16,10 @@ pub mod shape;
 pub mod tensor;
 
 #[derive(Debug, Clone)]
-pub struct DebugStruct(isize);
+pub struct DebugStruct(HashSet<String>);
 
 lazy_static::lazy_static! {
-    pub static ref DEBUG: DebugStruct = DebugStruct(std::env::var("DEBUG").unwrap_or("-1".into()).parse::<isize>().unwrap_or(-1));
+    pub static ref DEBUG: DebugStruct = DebugStruct(HashSet::from_iter(std::env::var("DEBUG").unwrap_or("NONE".into()).split(",").map(|s| s.to_string().to_uppercase()).collect::<Vec<String>>()));
 }
 
 pub mod prelude {
@@ -29,4 +31,5 @@ pub mod prelude {
     pub use crate::nn::optim::*;
     pub use crate::tensor::{Tensor, TensorDefaultType};
     pub use crate::DEBUG;
+    pub use num_traits::{AsPrimitive, Bounded, Float, FromPrimitive, Num, ToPrimitive, NumOps};
 }

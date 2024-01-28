@@ -1,6 +1,7 @@
+use ndarray::ArrayD;
 use storm::prelude::*;
 
 fn main() {
-    let a = Tensor::from([-0.314]).pow(0.314, false);
-    println!("{:?}", a.to_vec());
+    let a = Tensor::randn([2, 8, 4096, 40]).transpose(-1, -2);
+    println!("{}", a.realize());
 }
