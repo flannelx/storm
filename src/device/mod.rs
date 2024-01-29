@@ -11,8 +11,15 @@ use crate::{
     renderer::cstyle::{uops_to_cstyle, LanguageOpts, Renderer},
     shape::symbolic::NodeOp,
 };
-const DEVICES: [fn() -> anyhow::Result<Arc<dyn Device>>; 2] =
-    [opencl::CLDevice::new, cuda::CudaDevice::new];
+
+lazy_static::lazy_static! {
+    pub static ref DEVICES: Vec<fn() -> anyhow::Result<Arc<dyn Device>>> = vec![
+        #[cfg(not(macos))]
+        cuda::CudaDevice::new,
+        opencl::CLDevice::new,
+    ];
+}
+
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = {
         let mut d = vec![];

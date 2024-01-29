@@ -1,3 +1,5 @@
+#![cfg(not(macos))]
+
 use cudarc::driver::result::malloc_sync;
 use cudarc::driver::sys::{
     cuCtxCreate_v2, cuCtxSetCurrent, cuMemAllocManaged, cudaError_enum, CUcontext,
