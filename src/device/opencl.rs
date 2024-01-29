@@ -248,27 +248,7 @@ impl Default for CLRenderer {
 
 impl crate::ops::Op for CLRenderer {
     fn mulacc(&self, a: &str, b: &str, c: &str) -> String {
-        format!("mad((float){a}, (float){b}, (float){c})")
-    }
-
-    fn log2(&self, x: &str) -> String {
-        format!("log2((float){x})")
-    }
-
-    fn sqrt(&self, x: &str) -> String {
-        format!("sqrt((float){x})")
-    }
-
-    fn sin(&self, x: &str) -> String {
-        format!("sin((float){x})")
-    }
-
-    fn exp2(&self, x: &str) -> String {
-        format!("exp2((float){x})")
-    }
-
-    fn cmpmax(&self, a: &str, b: &str) -> String {
-        format!("max((float){a},(float){b})")
+        format!("mad({a}, {b}, {c})")
     }
 }
 
