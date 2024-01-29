@@ -266,6 +266,10 @@ impl crate::ops::Op for CLRenderer {
     fn exp2(&self, x: &str) -> String {
         format!("exp2((float){x})")
     }
+
+    fn cmpmax(&self, a: &str, b: &str) -> String {
+        format!("max((float){a},(float){b})")
+    }
 }
 
 impl Renderer for CLRenderer {

@@ -1040,6 +1040,8 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
         if si.out.device_buffer.is_none() {
             _realize_empty(&si.out);
         }
+        si.out.lazyop.src.clear();
+        si.out.lazyop.buffers.clear();
         let mut bufs = vec![(*si.out.device_buffer).as_ref().unwrap().clone()];
         bufs.extend(v![(*b.device_buffer).as_ref().unwrap().clone(), for b in si.inputs.iter()]);
         let cached = KERNEL_CACHED

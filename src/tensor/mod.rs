@@ -25,7 +25,7 @@ use std::ops::Neg;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-pub type TensorDefaultType = f16;
+pub type TensorDefaultType = f32;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub struct TensorId(pub(crate) usize);
@@ -76,7 +76,7 @@ impl Tensor {
     }
 
     pub fn from<E: dtype::NumType, V: Into<Vec<E>>>(data: V) -> Self {
-        let data = data.into().into_iter().map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()) ).collect::<Vec<TensorDefaultType>>();
+        let data = data.into().into_iter().map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap()).collect::<Vec<TensorDefaultType>>();
         let buffer = if data.len() == 1 {
             LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>(), "GPU")
         } else {
@@ -1151,8 +1151,6 @@ impl Tensor {
             ret = ret + 0;
         }
         run_schedule(ret.buffer.schedule(&mut seen));
-        ret.buffer.lazyop.src.clear();
-        ret.buffer.lazyop.buffers.clear();
         ret
     }
 

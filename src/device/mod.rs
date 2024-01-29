@@ -92,7 +92,7 @@ pub trait Buffer: core::fmt::Debug {
 
 #[derive(Default)]
 pub struct Allocator {
-    cached: Arc<HashMap<usize, Vec<*mut std::ffi::c_void>>>, // <Bytesize, Vec<_>>
+    pub cached: Arc<HashMap<usize, Vec<*mut std::ffi::c_void>>>, // <Bytesize, Vec<_>>
 }
 
 unsafe impl Send for Allocator {}
@@ -118,9 +118,13 @@ impl Allocator {
 
     pub fn free(&self, buf: &dyn Buffer) {
         unsafe {
-            let mut cc = self.cached.clone();
-            let cached = Arc::get_mut_unchecked(&mut cc);
-            cached.entry(buf.bytesize()).or_default().push(buf.ptr())
+            if std::env::var("LRU").unwrap_or("1".into()) == "1" {
+                let mut cc = self.cached.clone();
+                let cached = Arc::get_mut_unchecked(&mut cc);
+                cached.entry(buf.bytesize()).or_default().push(buf.ptr());
+            } else {
+                DEVICE.free(buf.ptr());
+            }
         }
     }
 
@@ -139,7 +143,7 @@ impl Allocator {
 }
 
 #[derive(Default)]
-pub struct AllocatorWrapper(Allocator);
+pub struct AllocatorWrapper(pub Allocator);
 
 lazy_static::lazy_static! {
     pub static ref ALLOCTOR: AllocatorWrapper = AllocatorWrapper::default();

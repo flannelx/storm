@@ -493,29 +493,8 @@ pub struct UNetModel {
     // Time embedded
     time_emb_lin1: Linear,
     time_emb_lin2: Linear,
-    inp_b_conv1: Conv2d,
 
-    // Input block
-    inp_b_res1: ResBlock,
-    inp_b_spat1: SpatialTransformer,
-    inp_b_res2: ResBlock,
-    inp_b_spat2: SpatialTransformer,
-    inp_b_down1: Downsample,
-
-    inp_b_res3: ResBlock,
-    inp_b_spat3: SpatialTransformer,
-    inp_b_res4: ResBlock,
-    inp_b_spat4: SpatialTransformer,
-    inp_b_down2: Downsample,
-
-    inp_b_res5: ResBlock,
-    inp_b_spat5: SpatialTransformer,
-    inp_b_res6: ResBlock,
-    inp_b_spat6: SpatialTransformer,
-    inp_b_down3: Downsample,
-
-    inp_b_res7: ResBlock,
-    inp_b_res8: ResBlock,
+    input_blocks: Vec<Vec<UnetComponent>>,
 
     // middle_block
     mid_res1: ResBlock,
@@ -563,6 +542,31 @@ pub struct UNetModel {
     out_conv: Conv2d,
 }
 
+pub enum UnetComponent {
+    Conv2d(Conv2d),
+    ResBlock(ResBlock),
+    SpatialTransformer(SpatialTransformer),
+    GroupNorm(GroupNorm),
+    Upsample(Upsample),
+    Downsample(Downsample),
+}
+macro_rules! impl_unet_comp {
+    ($t: tt) => {
+        impl From<$t> for UnetComponent {
+            fn from(value: $t) -> Self {
+                UnetComponent::$t(value)
+            }
+        }
+    };
+}
+
+impl_unet_comp!(Conv2d);
+impl_unet_comp!(ResBlock);
+impl_unet_comp!(SpatialTransformer);
+impl_unet_comp!(GroupNorm);
+impl_unet_comp!(Upsample);
+impl_unet_comp!(Downsample);
+
 impl UNetModel {
     #[rustfmt::skip]
     fn new() -> Self {
@@ -570,18 +574,20 @@ impl UNetModel {
             time_emb_lin1: Linear::new(320, 1280, None),
             time_emb_lin2: Linear::new(1280, 1280, None),
 
-            inp_b_conv1: Conv2d::new(4, 320, 3, None, [1], None, None, None),
-            inp_b_res1:  ResBlock::new(320, 1280, 320),   inp_b_spat1: SpatialTransformer::new(320, 768, 8, 40),
-            inp_b_res2:  ResBlock::new(320, 1280, 320),   inp_b_spat2: SpatialTransformer::new(320, 768, 8, 40),
-            inp_b_down1: Downsample::new(320),
-            inp_b_res3:  ResBlock::new(320, 1280, 640),   inp_b_spat3: SpatialTransformer::new(640, 768, 8, 80),
-            inp_b_res4:  ResBlock::new(640, 1280, 640),   inp_b_spat4: SpatialTransformer::new(640, 768, 8, 80),
-            inp_b_down2: Downsample::new(640),
-            inp_b_res5:  ResBlock::new(640, 1280, 1280),  inp_b_spat5: SpatialTransformer::new(1280, 768, 8, 160),
-            inp_b_res6:  ResBlock::new(1280, 1280, 1280), inp_b_spat6: SpatialTransformer::new(1280, 768, 8, 160),
-            inp_b_down3: Downsample::new(1280),
-            inp_b_res7:  ResBlock::new(1280, 1280, 1280),
-            inp_b_res8:  ResBlock::new(1280, 1280, 1280),
+            input_blocks: vec![
+                vec![Conv2d::new(4, 320, 3, None, [1], None, None, None).into()],
+                vec![ResBlock::new(320, 1280, 320).into(), SpatialTransformer::new(320, 768, 8, 40).into()],
+                vec![ResBlock::new(320, 1280, 320).into(), SpatialTransformer::new(320, 768, 8, 40).into()],
+                vec![Downsample::new(320).into()],
+                vec![ResBlock::new(320, 1280, 640).into(), SpatialTransformer::new(640, 768, 8, 80).into()],
+                vec![ResBlock::new(640, 1280, 640).into(), SpatialTransformer::new(640, 768, 8, 80).into()],
+                vec![Downsample::new(640).into()],
+                vec![ResBlock::new(640, 1280, 1280).into(), SpatialTransformer::new(1280, 768, 8, 160).into()],
+                vec![ResBlock::new(1280, 1280, 1280).into(), SpatialTransformer::new(1280, 768, 8, 160).into()],
+                vec![Downsample::new(1280).into()],
+                vec![ResBlock::new(1280, 1280, 1280).into()],
+                vec![ResBlock::new(1280, 1280, 1280).into()]
+            ],
 
             mid_res1: ResBlock::new(1280, 1280, 1280),
             mid_spat1: SpatialTransformer::new(1280, 768, 8, 160),
@@ -607,6 +613,7 @@ impl UNetModel {
 
     fn call(&self, x: &Tensor, timesteps: usize, context: Option<&Tensor>) -> Tensor {
         // time emb
+        let mut x = x.clone();
         let t_emb = timestep_embedding(timesteps, 320, None);
         let emb = self
             .time_emb_lin2
@@ -614,39 +621,19 @@ impl UNetModel {
         let mut save_inputs = vec![];
 
         // input block
-        let mut x = self.inp_b_conv1.call(&x);
-        save_inputs.push(x.clone());
-        x = self.inp_b_res1.call(&x, &emb);
-        x = self.inp_b_spat1.call(&x, context.clone());
-        save_inputs.push(x.clone());
-        x = self.inp_b_res2.call(&x, &emb);
-        x = self.inp_b_spat2.call(&x, context.clone());
-        save_inputs.push(x.clone());
-        x = self.inp_b_down1.call(&x);
-        save_inputs.push(x.clone());
-
-        x = self.inp_b_res3.call(&x, &emb);
-        x = self.inp_b_spat3.call(&x, context.clone());
-        save_inputs.push(x.clone());
-        x = self.inp_b_res4.call(&x, &emb);
-        x = self.inp_b_spat4.call(&x, context.clone());
-        save_inputs.push(x.clone());
-        x = self.inp_b_down2.call(&x);
-        save_inputs.push(x.clone());
-
-        x = self.inp_b_res5.call(&x, &emb);
-        x = self.inp_b_spat5.call(&x, context.clone());
-        save_inputs.push(x.clone());
-        x = self.inp_b_res6.call(&x, &emb);
-        x = self.inp_b_spat6.call(&x, context.clone());
-        save_inputs.push(x.clone());
-        x = self.inp_b_down3.call(&x);
-        save_inputs.push(x.clone());
-
-        x = self.inp_b_res7.call(&x, &emb);
-        save_inputs.push(x.clone());
-        x = self.inp_b_res8.call(&x, &emb);
-        save_inputs.push(x.clone());
+        for block in self.input_blocks.iter() {
+            for b in block.iter() {
+                match b {
+                    UnetComponent::Conv2d(bb) => x = bb.call(&x),
+                    UnetComponent::ResBlock(bb) => x = bb.call(&x, &emb),
+                    UnetComponent::SpatialTransformer(bb) => x = bb.call(&x, context.clone()),
+                    UnetComponent::Downsample(bb) => x = bb.call(&x),
+                    _ => (),
+                }
+            }
+            x.realize();
+            save_inputs.push(x.clone());
+        }
 
         // mid
         x = self.mid_res1.call(&x, &emb);
@@ -715,5 +702,5 @@ fn main() {
     let a = UNetModel::new();
     let ctx = Tensor::randn([2, 77, 768]);
     let out = a.call(&Tensor::randn([2, 4, 64, 64]), 801, Some(&ctx));
-    println!("{:?}", out.realize());
+    println!("{:?}", out.realize())
 }
