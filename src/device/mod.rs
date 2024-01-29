@@ -14,7 +14,7 @@ use crate::{
 
 lazy_static::lazy_static! {
     pub static ref DEVICES: Vec<fn() -> anyhow::Result<Arc<dyn Device>>> = vec![
-        #[cfg(not(macos))]
+        #[cfg(any(linux, windows))]
         cuda::CudaDevice::new,
         opencl::CLDevice::new,
     ];

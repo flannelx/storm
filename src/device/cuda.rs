@@ -1,4 +1,4 @@
-#![cfg(not(macos))]
+#![cfg(any(linux, windows))]
 
 use cudarc::driver::result::malloc_sync;
 use cudarc::driver::sys::{
