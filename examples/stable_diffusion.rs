@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use storm::nn::*;
 use storm::prelude::*;
 
@@ -495,6 +497,7 @@ pub struct UNetModel {
     time_emb_lin2: Linear,
 
     input_blocks: Vec<Vec<UnetComponent>>,
+    output_blocks: Vec<Vec<UnetComponent>>,
 
     // middle_block
     mid_res1: ResBlock,
@@ -593,6 +596,21 @@ impl UNetModel {
             mid_spat1: SpatialTransformer::new(1280, 768, 8, 160),
             mid_res2: ResBlock::new(1280, 1280, 1280),
 
+            output_blocks: vec![
+                vec![ResBlock::new(2560, 1280, 1280).into()],
+                vec![ResBlock::new(2560, 1280, 1280).into()],
+                vec![ResBlock::new(2560, 1280, 1280).into(), Upsample::new(1280).into()],
+                vec![ResBlock::new(2560, 1280, 1280).into(), SpatialTransformer::new(1280, 768, 8, 160).into()],
+                vec![ResBlock::new(2560, 1280, 1280).into(), SpatialTransformer::new(1280, 768, 8, 160).into()],
+                vec![ResBlock::new(1920, 1280, 1280).into(), SpatialTransformer::new(1280, 768, 8, 160).into(), Upsample::new(1280).into()],
+                vec![ResBlock::new(1920, 1280, 640).into(), SpatialTransformer::new(640, 768, 8, 80).into()],
+                vec![ResBlock::new(1280, 1280, 640).into(), SpatialTransformer::new(640, 768, 8, 80).into()],
+                vec![ResBlock::new(960, 1280, 640).into(), SpatialTransformer::new(640, 768, 8, 80).into(), Upsample::new(640).into()],
+                vec![ResBlock::new(960, 1280, 320).into(), SpatialTransformer::new(320, 768, 8, 40).into()],
+                vec![ResBlock::new(640, 1280, 320).into(), SpatialTransformer::new(320, 768, 8, 40).into()],
+                vec![ResBlock::new(640, 1280, 320).into(), SpatialTransformer::new(320, 768, 8, 40).into()],
+            ],
+
             outb_res1: ResBlock::new(2560, 1280, 1280),
             outb_res2: ResBlock::new(2560, 1280, 1280),
             outb_res3: ResBlock::new(2560, 1280, 1280), outb_up1: Upsample::new(1280),
@@ -621,14 +639,15 @@ impl UNetModel {
         let mut save_inputs = vec![];
 
         // input block
-        for block in self.input_blocks.iter() {
+        for (i, block) in self.input_blocks.iter().enumerate() {
+            print!("input block {i}");
             for b in block.iter() {
                 match b {
                     UnetComponent::Conv2d(bb) => x = bb.call(&x),
                     UnetComponent::ResBlock(bb) => x = bb.call(&x, &emb),
                     UnetComponent::SpatialTransformer(bb) => x = bb.call(&x, context.clone()),
                     UnetComponent::Downsample(bb) => x = bb.call(&x),
-                    _ => (),
+                    _ => panic!(),
                 }
             }
             x.realize();
@@ -640,54 +659,19 @@ impl UNetModel {
         x = self.mid_spat1.call(&x, context.clone());
         x = self.mid_res2.call(&x, &emb);
 
-        // output block
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res1.call(&x, &emb);
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res2.call(&x, &emb);
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res3.call(&x, &emb);
-        x = self.outb_up1.call(&x);
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res4.call(&x, &emb);
-        x = self.outb_spat1.call(&x, context.clone());
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res5.call(&x, &emb);
-        x = self.outb_spat2.call(&x, context.clone());
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res6.call(&x, &emb);
-        x = self.outb_spat3.call(&x, context.clone());
-        x = self.outb_up2.call(&x);
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res7.call(&x, &emb);
-        x = self.outb_spat4.call(&x, context.clone());
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res8.call(&x, &emb);
-        x = self.outb_spat5.call(&x, context.clone());
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res9.call(&x, &emb);
-        x = self.outb_spat6.call(&x, context.clone());
-        x = self.outb_up3.call(&x);
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res10.call(&x, &emb);
-        x = self.outb_spat7.call(&x, context.clone());
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res11.call(&x, &emb);
-        x = self.outb_spat8.call(&x, context.clone());
-
-        x = x.cat(&[save_inputs.pop().unwrap()], Some(1));
-        x = self.outb_res12.call(&x, &emb);
-        x = self.outb_spat9.call(&x, context.clone());
+        for (i, block) in self.output_blocks.iter().enumerate() {
+            print!("output block {i}");
+            x = x.cat(&[save_inputs.pop().unwrap()], Some(1)).realize();
+            for b in block.iter() {
+                match b {
+                    UnetComponent::ResBlock(bb) => x = bb.call(&x, &emb),
+                    UnetComponent::SpatialTransformer(bb) => x = bb.call(&x, context.clone()),
+                    UnetComponent::Upsample(bb) => x = bb.call(&x),
+                    _ => panic!(),
+                }
+            }
+            x.realize();
+        }
 
         // out
         x = self.out_gn.call(&x);
