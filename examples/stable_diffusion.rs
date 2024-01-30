@@ -597,24 +597,24 @@ impl UNetModel {
             for b in block.iter() {
                 match b {
                     UnetComponent::Conv2d(bb) => {
-                        println!("Conv2d");
+                        //println!("Conv2d");
                         x = bb.call(&x);
                     }
                     UnetComponent::ResBlock(bb) => {
-                        println!("ResBlock");
+                        //println!("ResBlock");
                         x = bb.call(&x, &emb);
                     }
                     UnetComponent::SpatialTransformer(bb) => {
-                        println!("SpatialTransformer");
+                        //println!("SpatialTransformer");
                         x = bb.call(&x, context.clone());
                     }
                     UnetComponent::Downsample(bb) => {
-                        println!("Downsample");
+                        //println!("Downsample");
                         x = bb.call(&x);
                     }
                     _ => panic!(),
                 }
-                println!("{}", x.nd());
+                //println!("{}", x.nd());
             }
             x.realize();
             save_inputs.push(x.clone());
@@ -631,20 +631,20 @@ impl UNetModel {
             for b in block.iter() {
                 match b {
                     UnetComponent::ResBlock(bb) => {
-                        println!("ResBlock");
+                        //println!("ResBlock");
                         x = bb.call(&x, &emb);
                     }
                     UnetComponent::SpatialTransformer(bb) => {
-                        println!("SpatialTransformer");
+                        //println!("SpatialTransformer");
                         x = bb.call(&x, context.clone());
                     }
                     UnetComponent::Upsample(bb) => {
-                        println!("Upsample");
+                        //println!("Upsample");
                         x = bb.call(&x);
                     }
                     _ => panic!(),
                 }
-                println!("{}", x.nd());
+                //println!("{}", x.nd());
             }
             x.realize();
         }
@@ -658,9 +658,188 @@ impl UNetModel {
     }
 }
 
+pub struct CLIPMLP {
+    fc1: Linear,
+    fc2: Linear,
+}
+
+impl CLIPMLP {
+    fn new() -> Self {
+        Self {
+            fc1: Linear::new(768, 3072, None),
+            fc2: Linear::new(3072, 768, None),
+        }
+    }
+
+    fn call(&self, hidden_states: &Tensor) -> Tensor {
+        let mut hidden_states = self.fc1.call(&hidden_states);
+        hidden_states = hidden_states.quick_gelu();
+        hidden_states = self.fc2.call(&hidden_states);
+        hidden_states
+    }
+}
+
+pub struct CLIPAttention {
+    embed_dim: usize,
+    num_heads: usize,
+    head_dim: usize,
+    k_proj: Linear,
+    v_proj: Linear,
+    q_proj: Linear,
+    out_proj: Linear,
+}
+
+impl CLIPAttention {
+    fn new() -> Self {
+        let embed_dim = 768;
+        let num_heads = 12;
+        let head_dim = embed_dim / num_heads;
+
+        Self {
+            embed_dim,
+            num_heads,
+            head_dim,
+            k_proj: Linear::new(embed_dim, embed_dim, None),
+            v_proj: Linear::new(embed_dim, embed_dim, None),
+            q_proj: Linear::new(embed_dim, embed_dim, None),
+            out_proj: Linear::new(embed_dim, embed_dim, None),
+        }
+    }
+
+    fn call(&self, hidden_states: &Tensor, causal_attention_mask: Option<Tensor>) -> Tensor {
+        let [bsz, tgt_len, embed_dim] = hidden_states.shape().dims[..] else {
+            panic!()
+        };
+        let shape = vec![
+            bsz,
+            tgt_len,
+            self.num_heads as isize,
+            self.head_dim as isize,
+        ];
+        let q = self
+            .q_proj
+            .call(&hidden_states)
+            .reshape(shape.as_ref())
+            .transpose(1, 2);
+        let k = self
+            .k_proj
+            .call(&hidden_states)
+            .reshape(shape.as_ref())
+            .transpose(1, 2);
+        let v = self
+            .v_proj
+            .call(&hidden_states)
+            .reshape(shape.as_ref())
+            .transpose(1, 2);
+        let attn_output =
+            Tensor::scaled_dot_product_attention(&q, &k, &v, causal_attention_mask, None, None);
+        self.out_proj.call(
+            &attn_output
+                .transpose(1, 2)
+                .reshape([bsz, tgt_len, embed_dim]),
+        )
+    }
+}
+
+pub struct CLIPEncoderLayer {
+    self_attn: CLIPAttention,
+    layr_norm1: LayerNorm,
+    mlp: CLIPMLP,
+    layr_norm2: LayerNorm,
+}
+
+impl CLIPEncoderLayer {
+    fn new() -> Self {
+        Self {
+            self_attn: CLIPAttention::new(),
+            layr_norm1: LayerNorm::new([768], None, None),
+            mlp: CLIPMLP::new(),
+            layr_norm2: LayerNorm::new([768], None, None),
+        }
+    }
+
+    fn call(&self, hidden_states: &Tensor, causal_attention_mask: Option<Tensor>) -> Tensor {
+        let mut residual = hidden_states.clone();
+        let mut hidden_states = self.layr_norm1.call(hidden_states);
+        hidden_states = self.self_attn.call(&hidden_states, causal_attention_mask);
+        hidden_states = residual + &hidden_states;
+
+        residual = hidden_states.clone();
+        hidden_states = self.layr_norm2.call(&hidden_states);
+        hidden_states = self.mlp.call(&hidden_states);
+        hidden_states = residual + hidden_states;
+
+        hidden_states
+    }
+}
+
+pub struct CLIPEncoder {
+    layers: Vec<CLIPEncoderLayer>,
+}
+
+impl CLIPEncoder {
+    fn new() -> Self {
+        Self {
+            layers: v![CLIPEncoderLayer::new(), for _ in 0..12],
+        }
+    }
+
+    fn call(&self, hidden_states: &Tensor, causal_attention_mask: Option<Tensor>) -> Tensor {
+        let mut hidden_states = hidden_states.clone();
+        for l in self.layers.iter() {
+            hidden_states = l.call(&hidden_states, causal_attention_mask.clone());
+        }
+        hidden_states
+    }
+}
+
+pub struct CLIPTextEmbeddings {
+    token_embedding: Embedding,
+    position_embedding: Embedding,
+}
+
+impl CLIPTextEmbeddings {
+    fn new() -> Self {
+        Self {
+            token_embedding: Embedding::new(49408, 768),
+            position_embedding: Embedding::new(77, 768),
+        }
+    }
+
+    fn call(&self, input_ids: &Tensor, position_ids: &Tensor) -> Tensor {
+        self.token_embedding.call(input_ids) + self.position_embedding.call(&position_ids)
+    }
+}
+
+pub struct CLIPTextTransformer {
+    embeddings: CLIPTextEmbeddings,
+    encoder: CLIPEncoder,
+    final_layer_norm: LayerNorm,
+}
+
+impl CLIPTextTransformer {
+    fn new() -> Self {
+        Self {
+            embeddings: CLIPTextEmbeddings::new(),
+            encoder: CLIPEncoder::new(),
+            final_layer_norm: LayerNorm::new([768], None, None),
+        }
+    }
+
+    fn call(&self, input_ids: &Tensor) -> Tensor {
+        let mut x = self.embeddings.call(input_ids, &Tensor::arange(input_ids.shape()[1] as f32).reshape([1, -1]));
+        x = self.encoder.call(&x, Some(Tensor::full([1, 1, 77,77], -f32::INFINITY).tril(Some(1))));
+        self.final_layer_norm.call(&x)
+    }
+}
+
+pub struct CLIPTokenizer {
+}
+
+use serde_json::Value;
+
 fn main() {
-    let a = UNetModel::new();
-    let ctx = Tensor::randn([1, 1, 768]).realize();
-    let out = a.call(&Tensor::randn([1, 4, 8, 8]).realize(), 801, Some(&ctx));
-    println!("{:?}", out.nd())
+    let s = include_str!("../tokenizer_vocab.json");
+    let json: Value = serde_json::from_str(s).unwrap();
+    println!("{:?}", json["<|startoftext|>"])
 }

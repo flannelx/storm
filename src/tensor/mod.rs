@@ -1343,6 +1343,10 @@ impl Tensor {
         ret
     }
 
+    pub fn quick_gelu(&self) -> Tensor {
+        self * &(self * 1.702).sigmoid()
+    }
+
     pub fn gelu(&self) -> Tensor {
         0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
     }
