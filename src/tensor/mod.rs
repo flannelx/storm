@@ -421,7 +421,7 @@ impl Tensor {
     }
 
     pub fn rsqrt(&self) -> Self {
-        (&Self::ones([1]) / self).sqrt()
+        self.reciprocal().sqrt()
     }
 
     pub fn tan(&self) -> Self {
@@ -1132,7 +1132,7 @@ impl Tensor {
         if self.shape().dims.contains(&0) {
             return out;
         }
-        out * (1f32 / self.numel() as f32)
+        &out * (out.numel() as f32 / self.numel() as f32)
     }
 
     // def abs(self): return self.relu() + (-self).relu()

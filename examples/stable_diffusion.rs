@@ -478,7 +478,8 @@ impl Upsample {
         let x = x
             .reshape([bs, c, py, 1, px, 1])
             .expand([bs, c, py, 2, px, 2])
-            .reshape([bs, c, py * 2, px * 2]);
+            .reshape([bs, c, py * 2, px * 2])
+            .realize();
         self.conv.call(&x)
     }
 }
@@ -497,48 +498,13 @@ pub struct UNetModel {
     time_emb_lin2: Linear,
 
     input_blocks: Vec<Vec<UnetComponent>>,
-    output_blocks: Vec<Vec<UnetComponent>>,
 
     // middle_block
     mid_res1: ResBlock,
     mid_spat1: SpatialTransformer,
     mid_res2: ResBlock,
 
-    // output block
-    outb_res1: ResBlock,
-    outb_res2: ResBlock,
-
-    outb_res3: ResBlock,
-    outb_up1: Upsample,
-
-    outb_res4: ResBlock,
-    outb_spat1: SpatialTransformer,
-
-    outb_res5: ResBlock,
-    outb_spat2: SpatialTransformer,
-
-    outb_res6: ResBlock,
-    outb_spat3: SpatialTransformer,
-    outb_up2: Upsample,
-
-    outb_res7: ResBlock,
-    outb_spat4: SpatialTransformer,
-
-    outb_res8: ResBlock,
-    outb_spat5: SpatialTransformer,
-
-    outb_res9: ResBlock,
-    outb_spat6: SpatialTransformer,
-    outb_up3: Upsample,
-
-    outb_res10: ResBlock,
-    outb_spat7: SpatialTransformer,
-
-    outb_res11: ResBlock,
-    outb_spat8: SpatialTransformer,
-
-    outb_res12: ResBlock,
-    outb_spat9: SpatialTransformer,
+    output_blocks: Vec<Vec<UnetComponent>>,
 
     // Out
     out_gn: GroupNorm,
@@ -611,19 +577,6 @@ impl UNetModel {
                 vec![ResBlock::new(640, 1280, 320).into(), SpatialTransformer::new(320, 768, 8, 40).into()],
             ],
 
-            outb_res1: ResBlock::new(2560, 1280, 1280),
-            outb_res2: ResBlock::new(2560, 1280, 1280),
-            outb_res3: ResBlock::new(2560, 1280, 1280), outb_up1: Upsample::new(1280),
-            outb_res4: ResBlock::new(2560, 1280, 1280), outb_spat1: SpatialTransformer::new(1280, 768, 8, 160),
-            outb_res5: ResBlock::new(2560, 1280, 1280), outb_spat2: SpatialTransformer::new(1280, 768, 8, 160),
-            outb_res6: ResBlock::new(1920, 1280, 1280), outb_spat3: SpatialTransformer::new(1280, 768, 8, 160), outb_up2: Upsample::new(1280),
-            outb_res7: ResBlock::new(1920, 1280, 640), outb_spat4: SpatialTransformer::new(640, 768, 8, 80),
-            outb_res8: ResBlock::new(1280, 1280, 640), outb_spat5: SpatialTransformer::new(640, 768, 8, 80),
-            outb_res9: ResBlock::new(960, 1280, 640), outb_spat6: SpatialTransformer::new(640, 768, 8, 80), outb_up3: Upsample::new(640),
-            outb_res10: ResBlock::new(960, 1280, 320), outb_spat7: SpatialTransformer::new(320, 768, 8, 40),
-            outb_res11: ResBlock::new(640, 1280, 320), outb_spat8: SpatialTransformer::new(320, 768, 8, 40),
-            outb_res12: ResBlock::new(640, 1280, 320), outb_spat9: SpatialTransformer::new(320, 768, 8, 40),
-
             out_gn: GroupNorm::new(32, 320, None, None),
             out_conv: Conv2d::new(320, 4, 3, None, [1], None, None, None),
         }
@@ -640,15 +593,28 @@ impl UNetModel {
 
         // input block
         for (i, block) in self.input_blocks.iter().enumerate() {
-            print!("input block {i}");
+            println!("input block {i}");
             for b in block.iter() {
                 match b {
-                    UnetComponent::Conv2d(bb) => x = bb.call(&x),
-                    UnetComponent::ResBlock(bb) => x = bb.call(&x, &emb),
-                    UnetComponent::SpatialTransformer(bb) => x = bb.call(&x, context.clone()),
-                    UnetComponent::Downsample(bb) => x = bb.call(&x),
+                    UnetComponent::Conv2d(bb) => {
+                        println!("Conv2d");
+                        x = bb.call(&x);
+                    }
+                    UnetComponent::ResBlock(bb) => {
+                        println!("ResBlock");
+                        x = bb.call(&x, &emb);
+                    }
+                    UnetComponent::SpatialTransformer(bb) => {
+                        println!("SpatialTransformer");
+                        x = bb.call(&x, context.clone());
+                    }
+                    UnetComponent::Downsample(bb) => {
+                        println!("Downsample");
+                        x = bb.call(&x);
+                    }
                     _ => panic!(),
                 }
+                println!("{}", x.nd());
             }
             x.realize();
             save_inputs.push(x.clone());
@@ -660,15 +626,25 @@ impl UNetModel {
         x = self.mid_res2.call(&x, &emb);
 
         for (i, block) in self.output_blocks.iter().enumerate() {
-            print!("output block {i}");
+            println!("output block {i}");
             x = x.cat(&[save_inputs.pop().unwrap()], Some(1)).realize();
             for b in block.iter() {
                 match b {
-                    UnetComponent::ResBlock(bb) => x = bb.call(&x, &emb),
-                    UnetComponent::SpatialTransformer(bb) => x = bb.call(&x, context.clone()),
-                    UnetComponent::Upsample(bb) => x = bb.call(&x),
+                    UnetComponent::ResBlock(bb) => {
+                        println!("ResBlock");
+                        x = bb.call(&x, &emb);
+                    }
+                    UnetComponent::SpatialTransformer(bb) => {
+                        println!("SpatialTransformer");
+                        x = bb.call(&x, context.clone());
+                    }
+                    UnetComponent::Upsample(bb) => {
+                        println!("Upsample");
+                        x = bb.call(&x);
+                    }
                     _ => panic!(),
                 }
+                println!("{}", x.nd());
             }
             x.realize();
         }
@@ -684,7 +660,7 @@ impl UNetModel {
 
 fn main() {
     let a = UNetModel::new();
-    let ctx = Tensor::randn([2, 77, 768]);
-    let out = a.call(&Tensor::randn([2, 4, 64, 64]), 801, Some(&ctx));
-    println!("{:?}", out.realize())
+    let ctx = Tensor::randn([1, 1, 768]).realize();
+    let out = a.call(&Tensor::randn([1, 4, 8, 8]).realize(), 801, Some(&ctx));
+    println!("{:?}", out.nd())
 }

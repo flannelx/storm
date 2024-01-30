@@ -1,7 +1,8 @@
 use ndarray::ArrayD;
-use storm::prelude::*;
+use storm::{prelude::*, nn::{GroupNorm, Conv2d}};
 
 fn main() {
-    let a = Tensor::randn([2, 8, 4096, 40]).transpose(-1, -2);
-    println!("{}", a.nd());
+    let a = Tensor::ones([1,1,8,8]);
+    let c = Conv2d::default(1, 3, 3);
+    println!("{:?}", c.call(&a).nd())
 }

@@ -46,7 +46,7 @@ impl Conv2d {
         let dilation = dilation.unwrap_or(1);
         let groups = groups.unwrap_or(1);
         let bias = bias.unwrap_or(false);
-        let weights = Tensor::uniform([out_channel, in_channel / groups, kernel_size, kernel_size]);
+        let weights = Tensor::kaiming_uniform([out_channel, in_channel / groups, kernel_size, kernel_size], Some(5.0.sqrt()));
         let bound = 1.0 / f32::sqrt(weights.shape().dims[1..].iter().product::<isize>() as f32);
         let bias = if bias {
             Some(Tensor::uniform_range([out_channel], -bound, bound))
@@ -146,7 +146,7 @@ impl GroupNorm {
                 None
             },
             bias: if affine {
-                Some(Tensor::ones([num_channels]))
+                Some(Tensor::zeros([num_channels]))
             } else {
                 None
             },
