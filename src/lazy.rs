@@ -220,6 +220,24 @@ impl LazyBuffer {
         .expand(&self.shape)
     }
 
+    pub fn from_bytes(x: &[u8]) -> Self {
+        let bytes = x;
+        let mut buf = DEVICE.alloc(x.len(), dtype::type_to_dtype::<u8>());
+        DEVICE.copyin(bytes.to_vec(), &*buf);
+        Self {
+            lazyop: LazyOp::new(Load::From.into(), vec![], None).into(),
+            st: ShapeTracker::from_shape(&[x.len() as isize]).into(),
+            device_buffer: Arc::new(Some(buf)),
+            _base: None,
+            shape: vec![x.len() as isize],
+            // children: HashSet::new(),
+            // views: HashSet::new(),
+            id: lb_id(),
+            dtype: dtype::type_to_dtype::<u8>(),
+            device: "GPU".into(),
+        }
+    }
+
     pub fn from_cpu<T: NumType>(x: Vec<T>) -> Self {
         let bytes = x
             .iter()

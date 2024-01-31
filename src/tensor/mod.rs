@@ -17,6 +17,7 @@ use crate::ops::Load;
 use crate::ops::OpType;
 use crate::prelude::*;
 use crate::prelude::*;
+use crate::shape::ShapeTracker;
 use crate::tensor::mlops::*;
 use crate::tensor::shape::Shape;
 use std::collections::HashMap;
@@ -77,12 +78,35 @@ impl Tensor {
     }
 
     pub fn from<E: dtype::NumType, V: Into<Vec<E>>>(data: V) -> Self {
-        let data = data.into().into_iter().map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap()).collect::<Vec<TensorDefaultType>>();
+        let data = data
+            .into()
+            .into_iter()
+            .map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap())
+            .collect::<Vec<TensorDefaultType>>();
         let buffer = if data.len() == 1 {
             LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>(), "GPU")
         } else {
             LazyBuffer::from_cpu(data)
         };
+        Self {
+            require_grad: false,
+            _ctx: None,
+            id: tensor_id(),
+            grad: Arc::new(Mutex::new(None)),
+            dtype: buffer.dtype.clone(),
+            device: buffer.device.clone(),
+            buffer: buffer.into(),
+        }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut buffer = LazyBuffer::from_bytes(bytes);
+        let dtype = type_to_dtype::<TensorDefaultType>();
+        buffer.st = ShapeTracker::from_shape(&[(bytes.len()
+            / dtype.size)
+            as isize]);
+        buffer.shape = buffer.st.shape();
+        buffer.dtype = dtype;
         Self {
             require_grad: false,
             _ctx: None,
@@ -528,9 +552,25 @@ impl Tensor {
             );
         }
         //x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
-        let x = self.reshape(vec![self.shape().dims[0..self.shape().len()-1].to_vec(), vec![1;(n1 - 1).min(n2 - 1).min(1)], vec![self.shape()[-1]]].concat());
+        let x = self.reshape(
+            vec![
+                self.shape().dims[0..self.shape().len() - 1].to_vec(),
+                vec![1; (n1 - 1).min(n2 - 1).min(1)],
+                vec![self.shape()[-1]],
+            ]
+            .concat(),
+        );
         //w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
-        let w = w.reshape(vec![self.shape().dims[0..self.shape().len()-2].to_vec(), vec![1;(n1 - 1).min(n2 - 1).min(1)], w.shape().dims[w.shape().len() - n2.min(2)..].to_vec()].concat()).transpose(-1, -(n2.min(2) as isize));
+        let w = w
+            .reshape(
+                vec![
+                    self.shape().dims[0..self.shape().len() - 2].to_vec(),
+                    vec![1; (n1 - 1).min(n2 - 1).min(1)],
+                    w.shape().dims[w.shape().len() - n2.min(2)..].to_vec(),
+                ]
+                .concat(),
+            )
+            .transpose(-1, -(n2.min(2) as isize));
         (x * w).sum([-1], false)
     }
 
@@ -929,14 +969,6 @@ impl Tensor {
 
     pub fn mul(&self, rhs: &Self) -> Self {
         let (a, b) = Tensor::_broadcast(&self, &rhs);
-        assert!(Arc::ptr_eq(
-            &self.buffer.device_buffer,
-            &a.buffer.device_buffer
-        ));
-        assert!(Arc::ptr_eq(
-            &rhs.buffer.device_buffer,
-            &b.buffer.device_buffer
-        ));
         Mul {
             need_input_grad: [a.require_grad, b.require_grad],
             ..Default::default()
@@ -957,6 +989,32 @@ impl Tensor {
         assert!(self.shape() == x.shape());
         self.buffer = x.buffer;
         self.clone()
+    }
+
+    pub fn assign_like(&mut self, mut x: Self) -> Self {
+        assert!(self.numel() == x.numel());
+        x = x.reshape(self.shape());
+        self.buffer = x.buffer;
+        self.clone()
+    }
+
+    pub fn assign_device_buffer(&mut self, mut x: Self) -> Self {
+        assert!(
+            self.numel() == x.numel(),
+            "{}:{} != {}",
+            self.shape(),
+            self.numel(),
+            x.numel()
+        );
+        self.assign_like(x)
+        // unsafe {
+        //     Arc::get_mut_unchecked(&mut self.buffer.device_buffer.clone())
+        //         .replace((*x.buffer.device_buffer).as_ref().unwrap().clone());
+        // }
+        // self.buffer.device_buffer = x.buffer.device_buffer;
+        // self.buffer.lazyop.src.clear();
+        // self.buffer.lazyop.buffers.clear();
+        // self.clone()
     }
 
     pub fn arange(to: f32) -> Self {
@@ -1276,8 +1334,7 @@ impl Tensor {
 
     pub fn triu(&self, k: Option<isize>) -> Self {
         let k = k.unwrap_or(0);
-        Self::_tri(self.shape()[-2], self.shape()[-1], Some(k))
-            ._where_(&self, &Tensor::_const(0))
+        Self::_tri(self.shape()[-2], self.shape()[-1], Some(k))._where_(&self, &Tensor::_const(0))
     }
 
     pub fn tril(&self, k: Option<isize>) -> Self {
