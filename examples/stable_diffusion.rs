@@ -140,7 +140,7 @@ impl Decoder {
         for (block, upsample) in self.up.iter().rev() {
             println!("\ndecode {}", x.shape());
             for b in block {
-                x = b.call(&x);
+                x = b.call(&x).realize();
             }
             if upsample.len() > 0 {
                 let [bs, c, py, px] = x.shape().dims[..] else {
@@ -773,14 +773,22 @@ impl CLIPEncoderLayer {
 
     fn call(&self, hidden_states: &Tensor, causal_attention_mask: Option<Tensor>) -> Tensor {
         let mut residual = hidden_states.clone();
+        //println!("1 residual {}", residual.nd());
         let mut hidden_states = self.layer_norm1.call(hidden_states);
+        //println!("1 hidden_states {}", hidden_states.nd());
         hidden_states = self.self_attn.call(&hidden_states, causal_attention_mask);
+        //println!("2 hidden_states {}", hidden_states.nd());
         hidden_states = residual + &hidden_states;
+        //println!("3 hidden_states {}", hidden_states.nd());
 
         residual = hidden_states.clone();
+        //println!("2 residual {}", residual.nd());
         hidden_states = self.layer_norm2.call(&hidden_states);
+        //println!("1 hidden_states {}", hidden_states.nd());
         hidden_states = self.mlp.call(&hidden_states);
+        //println!("2 hidden_states {}", hidden_states.nd());
         hidden_states = residual + hidden_states;
+        //println!("3 hidden_states {}", hidden_states.nd());
 
         hidden_states
     }
@@ -819,7 +827,11 @@ impl CLIPTextEmbeddings {
     }
 
     fn call(&self, input_ids: &Tensor, position_ids: &Tensor) -> Tensor {
-        self.token_embedding.call(input_ids) + self.position_embedding.call(&position_ids)
+        let token_emb = self.token_embedding.call(input_ids);
+        let pos_emb = self.position_embedding.call(&position_ids);
+        // println!("token_emb\n{:?}\n{:?}", token_emb.nd(), token_emb.buffer.st);
+        // println!("pos_emb\n{:?}\n{:?}", pos_emb.nd(), pos_emb.buffer.st);
+        token_emb + pos_emb
     }
 }
 
@@ -1045,7 +1057,9 @@ impl StableDiffusion {
         alphas_prev: &Tensor,
         guidence: &Tensor,
     ) -> Tensor {
-        let e_t = self.get_model_output(uncond_context, context, latent, timestep, guidence);
+        let e_t = self
+            .get_model_output(uncond_context, context, latent, timestep, guidence)
+            .realize();
         let (x_prev, _) = self.get_x_prev_and_pred_x0(latent, &e_t, alphas, alphas_prev);
         x_prev.realize()
     }
@@ -1468,7 +1482,6 @@ fn main() {
     load_text_model(model.cond_stage_model.as_mut().unwrap());
     load_vae(&mut model.first_stage_model);
     load_unet(&mut model.model);
-
     let tokenizer = Tokenizer::new();
     let tokens = tokenizer.encode("a horse sized cat eating a bagel");
     let prompt =
@@ -1480,7 +1493,8 @@ fn main() {
         .call(&prompt)
         .realize();
     // println!("{:?}", prompt.nd());
-    // println!("{:?}\n", context.nd());
+    // println!("context\n{:?}\n", context.nd());
+    // panic!();
     // println!("token_embedding  \n{:?}", model.cond_stage_model.as_ref().unwrap().embeddings.token_embedding.weight.nd());
     // println!("vae decode norm1 \n{:?}", model.first_stage_model.decoder.up[0].0[0].norm1.weights.as_ref().unwrap().nd());
 
@@ -1526,11 +1540,11 @@ fn main() {
     let mut x = model.decode(&latent);
 
     x = (x + 1.) / 2.;
-    x = x.reshape([3, w*8, h*8]).permute([1, 2, 0]).clip(0., 1.) * 255.;
+    x = x.reshape([3, w * 8, h * 8]).permute([1, 2, 0]).clip(0., 1.) * 255.;
     println!("out shape {}", x.shape());
     let image_data = x.to_vec().into_iter().map(|s| s as u8).collect::<Vec<u8>>();
 
-    let image = ImageView::new(ImageInfo::rgb8(128, 128), &image_data);
+    let image = ImageView::new(ImageInfo::rgb8(w * 8, h * 8), &image_data);
     let window = create_window("image", Default::default()).unwrap();
     window.set_image("image-001", image).unwrap();
     loop {}

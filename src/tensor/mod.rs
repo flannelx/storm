@@ -994,6 +994,7 @@ impl Tensor {
     pub fn assign_like(&mut self, mut x: Self) -> Self {
         assert!(self.numel() == x.numel());
         x = x.reshape(self.shape());
+        x.buffer.st = ShapeTracker::from_shape(&x.shape().dims);
         self.buffer = x.buffer;
         self.clone()
     }

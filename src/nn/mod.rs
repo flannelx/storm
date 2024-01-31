@@ -319,7 +319,7 @@ impl LayerNorm {
         let normalized_shape = normalized_shape.into().dims;
         let eps = eps.unwrap_or(1e-5);
         let elementwise_affine = elementwise_affine.unwrap_or(true);
-        let axis = v![-1-1, for i in 0..normalized_shape.len() as isize];
+        let axis = v![-1-i, for i in 0..normalized_shape.len() as isize];
         let weights = if elementwise_affine {
             Some(Tensor::ones(normalized_shape.clone()))
         } else {

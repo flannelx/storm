@@ -1,7 +1,7 @@
 use ndarray::ArrayD;
-use storm::{prelude::*, nn::{GroupNorm, Conv2d}};
+use storm::{prelude::*, nn::{GroupNorm, Conv2d}, shape::ShapeTracker};
 
 fn main() {
-    let a = Tensor::_arange(0.0046601, 1., 0.0046601);
-    println!("{}", a.nd());
+    let a = Tensor::randn([3,3,3]);
+    println!("{:?}", ShapeTracker::from_shape(&[1,3,3]))
 }
