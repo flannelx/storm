@@ -46,7 +46,10 @@ impl Conv2d {
         let dilation = dilation.unwrap_or(1);
         let groups = groups.unwrap_or(1);
         let bias = bias.unwrap_or(false);
-        let weights = Tensor::kaiming_uniform([out_channel, in_channel / groups, kernel_size, kernel_size], Some(5.0.sqrt()));
+        let weights = Tensor::kaiming_uniform(
+            [out_channel, in_channel / groups, kernel_size, kernel_size],
+            Some(5.0.sqrt()),
+        );
         let bound = 1.0 / f32::sqrt(weights.shape().dims[1..].iter().product::<isize>() as f32);
         let bias = if bias {
             Some(Tensor::uniform_range([out_channel], -bound, bound))
@@ -203,8 +206,10 @@ impl Embedding {
 
     pub fn call(&self, idx: &Tensor) -> Tensor {
         if self.vocab_counter.is_none() {
-            unsafe {*Arc::get_mut_unchecked(&mut self.vocab_counter.clone()) =
-                Some(Tensor::arange(self.vocab_size as f32).reshape([1, 1, self.vocab_size]))};
+            unsafe {
+                *Arc::get_mut_unchecked(&mut self.vocab_counter.clone()) =
+                    Some(Tensor::arange(self.vocab_size as f32).reshape([1, 1, self.vocab_size]))
+            };
         }
         let [batch_size, seqlen] = idx.shape().dims[..] else {
             panic!()
@@ -225,8 +230,10 @@ impl Embedding {
 impl Sequential for Embedding {
     fn forward(&self, idx: &Tensor, other: Option<SeqArgs>) -> Tensor {
         if self.vocab_counter.is_none() {
-            unsafe {*Arc::get_mut_unchecked(&mut self.vocab_counter.clone()) =
-                Some(Tensor::arange(self.vocab_size as f32).reshape([1, 1, self.vocab_size]))};
+            unsafe {
+                *Arc::get_mut_unchecked(&mut self.vocab_counter.clone()) =
+                    Some(Tensor::arange(self.vocab_size as f32).reshape([1, 1, self.vocab_size]))
+            };
         }
         let [batch_size, seqlen] = idx.shape().dims[..] else {
             panic!()

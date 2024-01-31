@@ -968,8 +968,7 @@ impl Linearizer {
                         // TODO: UnaryOps.Cast
                         // if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:  # noqa: E501
                         //   x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
-                        if matches!(x.src[0], LazyOpSrc::LazyOp(_))
-                            && x.src[0].optype() == Binary::Mul
+                        if x.src[0].optype() == Binary::Mul
                         {
                             x = LazyOp::new(
                                 OpType::Ternary(Ternary::Mulacc),
@@ -1146,7 +1145,7 @@ pub fn get_reduce_acc(op: OpType, dtype: Dtype) -> ConstNum {
     };
     if op == Reduce::Max {
         return if dtype.is_float() {
-            ConstNum::Float(-f32::INFINITY)
+            ConstNum::Float(f32::NEG_INFINITY)
         } else {
             ConstNum::Int(-i128::MAX)
         };

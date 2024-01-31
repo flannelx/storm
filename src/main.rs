@@ -2,7 +2,7 @@ use ndarray::ArrayD;
 use storm::{prelude::*, nn::{GroupNorm, Conv2d}};
 
 fn main() {
-    let a = Tensor::ones([1,1,8,8]);
-    let c = Conv2d::default(1, 3, 3);
-    println!("{:?}", c.call(&a).nd())
+    let a = Tensor::rand([768, 49408]);
+    let b = Tensor::rand([49408, 768]);
+    a.matmul(&b).realize();
 }

@@ -1,5 +1,9 @@
 #![allow(unused)]
 
+use std::collections::HashMap;
+
+use regex::bytes::Regex;
+use serde_json::Value;
 use storm::nn::*;
 use storm::prelude::*;
 
@@ -484,11 +488,11 @@ impl Upsample {
     }
 }
 
-pub fn timestep_embedding(timesteps: usize, dim: usize, max_period: Option<usize>) -> Tensor {
+pub fn timestep_embedding(timesteps: &Tensor, dim: usize, max_period: Option<usize>) -> Tensor {
     let half = dim as f32 / 2.;
     let max_period = max_period.unwrap_or(10000);
     let freqs = (-(max_period as f32).ln() * Tensor::arange(half) / half).exp();
-    let args = timesteps as f32 * freqs;
+    let args = timesteps * &freqs;
     Tensor::cat(&args.cos(), &[args.sin()], None).reshape([1, -1])
 }
 
@@ -582,7 +586,7 @@ impl UNetModel {
         }
     }
 
-    fn call(&self, x: &Tensor, timesteps: usize, context: Option<&Tensor>) -> Tensor {
+    fn call(&self, x: &Tensor, timesteps: &Tensor, context: Option<&Tensor>) -> Tensor {
         // time emb
         let mut x = x.clone();
         let t_emb = timestep_embedding(timesteps, 320, None);
@@ -786,7 +790,7 @@ impl CLIPEncoder {
 
     fn call(&self, hidden_states: &Tensor, causal_attention_mask: Option<Tensor>) -> Tensor {
         let mut hidden_states = hidden_states.clone();
-        for l in self.layers.iter() {
+        for (i, l) in self.layers.iter().enumerate() {
             hidden_states = l.call(&hidden_states, causal_attention_mask.clone());
         }
         hidden_states
@@ -827,19 +831,220 @@ impl CLIPTextTransformer {
     }
 
     fn call(&self, input_ids: &Tensor) -> Tensor {
-        let mut x = self.embeddings.call(input_ids, &Tensor::arange(input_ids.shape()[1] as f32).reshape([1, -1]));
-        x = self.encoder.call(&x, Some(Tensor::full([1, 1, 77,77], -f32::INFINITY).tril(Some(1))));
+        let mut x = self.embeddings.call(
+            input_ids,
+            &Tensor::arange(input_ids.shape()[1] as f32).reshape([1, -1]),
+        );
+        x = self.encoder.call(
+            &x,
+            Some(Tensor::full([1, 1, 77, 77], f32::NEG_INFINITY).triu(Some(1))),
+        );
         self.final_layer_norm.call(&x)
     }
 }
 
-pub struct CLIPTokenizer {
+pub struct Tokenizer {
+    vocab: Value,
+    merge: HashMap<Vec<String>, u64>,
+    eos_token: u64,
+    bos_token: u64,
+    pad_token: u64,
+    max_length: u64,
+    pat: Regex,
 }
 
-use serde_json::Value;
+fn get_pairs(s: &[String]) -> Vec<Vec<String>> {
+    let a = s.iter();
+    let mut b = s.iter();
+    b.next();
+    a.zip(b)
+        .into_iter()
+        .map(|(s1, s2)| vec![s1.clone(), s2.clone()])
+        .collect()
+}
+
+impl Tokenizer {
+    fn new() -> Self {
+        let vocab: Value = serde_json::from_str(include_str!("../tokenizer_vocab.json")).unwrap();
+        let merge = include_str!("../tokenizer_merges.txt")
+            .split("\n")
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+        let merge = HashMap::from_iter(
+            merge[1..merge.len() - 1]
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    (
+                        s.split_whitespace()
+                            .into_iter()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<String>>(),
+                        i as u64,
+                    )
+                })
+                .collect::<Vec<(Vec<String>, u64)>>(),
+        );
+        Self {
+            eos_token: vocab["<|endoftext|>"].as_u64().unwrap(),
+            bos_token: vocab["<|startoftext|>"].as_u64().unwrap(),
+            pad_token: vocab["<|endoftext|>"].as_u64().unwrap(),
+            max_length: 77,
+            vocab,
+            merge,
+            pat: Regex::new(r"(?i)<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+").unwrap(),
+        }
+    }
+
+    fn bpe(&self, texts: Vec<String>) -> Vec<String> {
+        let mut words = texts;
+        *words.last_mut().unwrap() += "</w>";
+        while words.len() > 1 {
+            let valid_pairs =
+                v![pair, for pair in get_pairs(&words), if self.merge.contains_key(&pair)];
+            if valid_pairs.len() == 0 {
+                break;
+            }
+
+            let bigram = valid_pairs.iter().min_by_key(|&p| self.merge[p]).unwrap();
+            let [ref first, ref second] = bigram[..] else {
+                panic!()
+            };
+            let mut new_words = vec![];
+            for word in words.iter() {
+                if word == second && !new_words.is_empty() && new_words.last().unwrap() == first {
+                    *new_words.last_mut().unwrap() = first.clone() + second;
+                } else {
+                    new_words.push(word.to_string());
+                }
+            }
+            words = new_words;
+        }
+        words
+    }
+
+    fn encode(&self, s: &str) -> Vec<u64> {
+        let mut text = String::from_utf8(
+            Regex::new(r"\s+")
+                .unwrap()
+                .replace_all(s.as_bytes(), b" ")
+                .to_vec(),
+        )
+        .unwrap();
+        text = text.trim().to_lowercase();
+        let mut tokens = vec![self.bos_token];
+        for chunk in self.pat.captures_iter(s.as_bytes()) {
+            let chunk = chunk
+                .iter()
+                .map(|s| String::from_utf8(s.unwrap().as_bytes().to_vec()).unwrap())
+                .collect();
+            tokens.extend(v![self.vocab[word].as_u64().unwrap(),for word in self.bpe(chunk)])
+        }
+        tokens.push(self.eos_token);
+        if tokens.len() <= self.max_length as usize {
+            for _ in 0..self.max_length as usize - tokens.len() {
+                tokens.push(self.eos_token);
+            }
+            return tokens;
+        }
+        tokens = tokens[..self.max_length as usize].to_vec();
+        let token_len = tokens.len();
+        let pad_len = self.max_length as usize - token_len;
+        tokens.extend(vec![self.pad_token; pad_len]);
+        tokens
+    }
+}
+
+pub struct StableDiffusion {
+    alphas_comprod: Tensor,
+    model: UNetModel,
+    first_stage_model: AutoencoderKL,
+    cond_stage_model: CLIPTextTransformer,
+}
+
+impl StableDiffusion {
+    fn new() -> Self {
+        Self {
+            alphas_comprod: Tensor::empty([1000]),
+            model: UNetModel::new(),
+            first_stage_model: AutoencoderKL::new(),
+            cond_stage_model: CLIPTextTransformer::new(),
+        }
+    }
+
+    fn get_x_prev_and_pred_x0(
+        &self,
+        x: &Tensor,
+        e_t: &Tensor,
+        a_t: &Tensor,
+        a_prev: &Tensor,
+    ) -> (Tensor, Tensor) {
+        let temp = 1.;
+        let sigma_t = 0.;
+        let sqrt_one_minus_at = (1.0 - a_t).sqrt();
+
+        let pred_x0 = (x - &(sqrt_one_minus_at * e_t)) / a_t.sqrt();
+        let dir_xt = (1. - a_prev - sigma_t.powf(2.)).sqrt() * e_t;
+        let x_prev = a_prev.sqrt() * &pred_x0 + dir_xt;
+        (x_prev, pred_x0)
+    }
+
+    fn get_model_output(
+        &self,
+        unconditional_context: &Tensor,
+        context: &Tensor,
+        latent: &Tensor,
+        timestep: &Tensor,
+        unconditional_guidance_scale: &Tensor,
+    ) -> Tensor {
+        let ctx = unconditional_context.cat(&[context.clone()], Some(0));
+        let latent = self.model.call(
+            &latent.expand(vec![vec![2], latent.shape().dims[1..].to_vec()].concat()),
+            timestep,
+            Some(&ctx),
+        );
+
+        let uncond_latent = latent.shrink([(0, 1), (0, 2), (0, 2), (0, 2)]);
+        let latent = latent.shrink([(1, 2), (0, 2), (0, 2), (0, 2)]);
+        let e_t = &uncond_latent + &(unconditional_guidance_scale * &(&latent - &uncond_latent));
+        e_t
+    }
+
+    fn decode(&self, x: &Tensor) -> Tensor {
+        let mut x = self
+            .first_stage_model
+            .post_quant_conv
+            .call(&(1. / 0.18215 * x));
+        x = self.first_stage_model.decoder.call(&x);
+
+        x = (x + 1.) / 2.;
+        x = x.reshape([3, 512, 512]).permute([1, 2, 0]).clip(0., 1.) * 255.;
+        x
+    }
+
+    fn call(
+        &self,
+        uncond_context: &Tensor,
+        context: &Tensor,
+        latent: &Tensor,
+        timestep: &Tensor,
+        alphas: &Tensor,
+        alphas_prev: &Tensor,
+        guidence: &Tensor,
+    ) -> Tensor {
+        let e_t = self.get_model_output(uncond_context, context, latent, timestep, guidence);
+        let (x_prev, _) = self.get_x_prev_and_pred_x0(latent, &e_t, alphas, alphas_prev);
+        x_prev.realize()
+    }
+}
 
 fn main() {
-    let s = include_str!("../tokenizer_vocab.json");
-    let json: Value = serde_json::from_str(s).unwrap();
-    println!("{:?}", json["<|startoftext|>"])
+    let model = StableDiffusion::new();
+    let tokenizer = Tokenizer::new();
+    let tokens = tokenizer.encode("draw a cat");
+    let prompt =
+        Tensor::from(tokens.iter().map(|&e| e as f32).collect::<Vec<f32>>()).reshape([1, -1]);
+    let context = model.cond_stage_model.call(&prompt);
+    println!("{}", context.nd());
 }

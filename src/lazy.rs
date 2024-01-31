@@ -396,51 +396,52 @@ impl LazyBuffer {
 
     pub fn r<O: Into<OpType>>(&self, optype: O, new_shape: &[isize]) -> Self {
         let optype = optype.into();
-        if self.shape.iter().product::<isize>() / new_shape.iter().product::<isize>() < 32768 {
-            return self._reduce_op(optype, new_shape);
-        }
-        let mut t = vec![];
-        for (i, (&old, (&new, &stride))) in self
-            .shape
-            .iter()
-            .zip(new_shape.iter().zip(self.st.strides().iter()))
-            .enumerate()
-        {
-            if old == new {
-                continue;
-            }
-            let divisor = gcd(256, old);
-            let heuristic: f32 = if stride <= 0 {
-                divisor as f32 / stride as f32
-            } else {
-                0.0
-            };
-            let dim_to_split = i;
-            t.push((heuristic, divisor, dim_to_split));
-        }
-        let &(heuristic, divisor, dim_to_split) =
-            t.iter().max_by(|a, b| f32::total_cmp(&a.0, &b.0)).unwrap();
-        if divisor < 16 && heuristic < 0.1 {
-            return self._reduce_op(optype, new_shape);
-        }
-
-        let splitted_shape = |dim_aft_div: Vec<isize>| -> Vec<isize> {
-            let dim_to_split = dim_to_split as usize;
-            vec![
-                self.shape[..dim_to_split].to_vec(),
-                vec![self.shape[dim_to_split] / divisor],
-                dim_aft_div,
-                self.shape[dim_to_split + 1..].to_vec(),
-            ]
-            .concat()
-        };
-        let sh1 = splitted_shape(vec![divisor]);
-        let sh2 = splitted_shape(vec![1]);
-        let sh3 = splitted_shape(vec![]);
-        self.reshape(&sh1)
-            ._reduce_op(optype.clone(), &sh2)
-            .reshape(&sh3)
-            ._reduce_op(optype, new_shape)
+        self._reduce_op(optype, new_shape)
+        // if self.shape.iter().product::<isize>() / new_shape.iter().product::<isize>() < 32768 {
+        //     return self._reduce_op(optype, new_shape);
+        // }
+        // let mut t = vec![];
+        // for (i, (&old, (&new, &stride))) in self
+        //     .shape
+        //     .iter()
+        //     .zip(new_shape.iter().zip(self.st.strides().iter()))
+        //     .enumerate()
+        // {
+        //     if old == new {
+        //         continue;
+        //     }
+        //     let divisor = gcd(256, old);
+        //     let heuristic: f32 = if stride <= 0 {
+        //         divisor as f32 / stride as f32
+        //     } else {
+        //         0.0
+        //     };
+        //     let dim_to_split = i;
+        //     t.push((heuristic, divisor, dim_to_split));
+        // }
+        // let &(heuristic, divisor, dim_to_split) =
+        //     t.iter().max_by(|a, b| f32::total_cmp(&a.0, &b.0)).unwrap();
+        // if divisor < 16 && heuristic < 0.1 {
+        //     return self._reduce_op(optype, new_shape);
+        // }
+        //
+        // let splitted_shape = |dim_aft_div: Vec<isize>| -> Vec<isize> {
+        //     let dim_to_split = dim_to_split as usize;
+        //     vec![
+        //         self.shape[..dim_to_split].to_vec(),
+        //         vec![self.shape[dim_to_split] / divisor],
+        //         dim_aft_div,
+        //         self.shape[dim_to_split + 1..].to_vec(),
+        //     ]
+        //     .concat()
+        // };
+        // let sh1 = splitted_shape(vec![divisor]);
+        // let sh2 = splitted_shape(vec![1]);
+        // let sh3 = splitted_shape(vec![]);
+        // self.reshape(&sh1)
+        //     ._reduce_op(optype.clone(), &sh2)
+        //     .reshape(&sh3)
+        //     ._reduce_op(optype, new_shape)
     }
 
     pub fn _movement_op(&self, st: ShapeTracker, optype: OpType, arg: &[isize]) -> Self {
@@ -1016,8 +1017,12 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     //TODO: Need to "copyin/out" here to avoid alloc data to new buf instead of bufs that are
     //already allocated.
     let debug_cache = DEBUG.0.contains("CACHE");
+    let debug_kernel = DEBUG.0.contains("KERNEL");
     while !schedule.is_empty() {
         let mut si = schedule.pop_front().unwrap();
+        if DEBUG.0.contains("OP") {
+            println!("{:?}\n", si.out.lazyop.optype);
+        }
         //println!("si optype {:?}", si.ast.optype);
         for x in si.inputs.iter() {
             if !x.is_realized() {
@@ -1079,7 +1084,7 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
                 vec![]
             };
             let (name, prg_str) = DEVICE.render(lin);
-            if DEBUG.0.contains("KERNEL") {
+            if debug_kernel {
                 println!("{prg_str}");
             }
             if debug_cache {

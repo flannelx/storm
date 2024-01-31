@@ -8,6 +8,7 @@ use num_traits::One;
 use num_traits::Zero;
 
 use crate::arg::Arg;
+use crate::dtype::_bool;
 use crate::dtype::type_to_dtype;
 use crate::dtype::NumType;
 use crate::lazy::run_schedule;
@@ -309,13 +310,6 @@ impl Tensor {
             Some(flatten_p.into()),
             Some(const_value._to_le_bytes()),
         )
-        // Tensor {
-        //     inner: self.inner.pad(arg, const_value),
-        //     require_grad: false,
-        //     _ctx: None,
-        //     id: tensor_id(),
-        //     grad: None,
-        // }
     }
 
     pub fn pad2d<P: Into<Vec<usize>>>(&self, padding: P, const_value: impl NumType) -> Self {
@@ -456,7 +450,7 @@ impl Tensor {
                 if fxn_name == "Sum" {
                     0.0
                 } else {
-                    -f32::INFINITY
+                    f32::NEG_INFINITY
                 },
             );
         }
@@ -533,20 +527,10 @@ impl Tensor {
                 w.shape()
             );
         }
-        let mut x_reshape = Vec::new();
         //x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
-        x_reshape.extend_from_slice(&self.shape().dims[..n1 - 1]);
-        x_reshape.extend_from_slice(&vec![1; (n1 - 1).min(n2 - 1).min(1)]);
-        x_reshape.push(self.shape()[-1]);
-        let x = self.reshape(x_reshape);
-        // w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
-        let mut w_reshape = Vec::new();
-        if n2 >= 2 {
-            w_reshape.extend_from_slice(&w.shape().dims[0..n2 - 2]);
-        }
-        w_reshape.extend_from_slice(&vec![1; (n1 - 1).min(n2 - 1).min(1)]);
-        w_reshape.extend_from_slice(&w.shape().dims[n2 - (n2.min(2))..]);
-        let w = w.reshape(w_reshape).transpose(-1, -(n2.min(2) as isize));
+        let x = self.reshape(vec![self.shape().dims[0..self.shape().len()-1].to_vec(), vec![1;(n1 - 1).min(n2 - 1).min(1)], vec![self.shape()[-1]]].concat());
+        //w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
+        let w = w.reshape(vec![self.shape().dims[0..self.shape().len()-2].to_vec(), vec![1;(n1 - 1).min(n2 - 1).min(1)], w.shape().dims[w.shape().len() - n2.min(2)..].to_vec()].concat()).transpose(-1, -(n2.min(2) as isize));
         (x * w).sum([-1], false)
     }
 
@@ -1265,10 +1249,10 @@ impl Tensor {
         let dropout_p = dropout_p.unwrap_or(0.0);
         let is_causal = is_causal.unwrap_or(false);
         if is_causal {
-            attn_mask = Some(Tensor::ones([self.shape()[-1], key.shape()[-2]]).tril(Some(0)))
+            attn_mask = Some(Tensor::ones([self.shape()[-2], key.shape()[-2]]).tril(Some(0)))
         }
-        if let Some(am) = attn_mask.as_mut() {
-            *am = (am._eq(&Tensor::_const(0))._where(-f32::INFINITY, 0.0));
+        if let Some(am) = attn_mask.as_mut() && am.dtype == _bool {
+            *am = am._eq(&Tensor::_const(0.0))._where(f32::NEG_INFINITY, 0.0);
         }
         let qk = self.matmul(&key.transpose(-2, -1)) / (self.shape()[-1] as f32).sqrt();
         (if let Some(am) = attn_mask {
@@ -1288,6 +1272,12 @@ impl Tensor {
                 .unsqueeze(0)
                 .expand([r, c]),
         )
+    }
+
+    pub fn triu(&self, k: Option<isize>) -> Self {
+        let k = k.unwrap_or(0);
+        Self::_tri(self.shape()[-2], self.shape()[-1], Some(k))
+            ._where_(&self, &Tensor::_const(0))
     }
 
     pub fn tril(&self, k: Option<isize>) -> Self {

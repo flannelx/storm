@@ -338,7 +338,7 @@ impl Function for Exp {
         let ret = x
             .e(
                 Binary::Mul,
-                &[x.const_like(1f32 / 2.0f32.log(core::f32::consts::E))],
+                &[x.const_like(1f32 / 2.0f32.ln())],
                 None,
             )
             .e(Unary::Exp2, &[], None);
