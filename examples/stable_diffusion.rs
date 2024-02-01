@@ -595,16 +595,21 @@ impl UNetModel {
             for b in block.iter() {
                 match b {
                     UnetComponent::Conv2d(bb) => {
-                        //println!("Conv2d");
+                        //println!("block {i} conv in\n{}", x.nd());
                         x = bb.call(&x);
+                        //println!("block {i} conv out\n{}", x.nd());
                     }
                     UnetComponent::ResBlock(bb) => {
                         //println!("ResBlock");
+                        //println!("block {i} res in\n{}", x.nd());
                         x = bb.call(&x, &emb);
+                        //println!("block {i} res out\n{}", x.nd());
                     }
                     UnetComponent::SpatialTransformer(bb) => {
                         //println!("SpatialTransformer");
+                        //println!("block {i} spat in\n{}", x.nd());
                         x = bb.call(&x, context.clone());
+                        //println!("block {i} spat out\n{}", x.nd());
                     }
                     UnetComponent::Downsample(bb) => {
                         //println!("Downsample");
@@ -1019,20 +1024,20 @@ impl StableDiffusion {
         unconditional_guidance_scale: &Tensor,
     ) -> Tensor {
         let ctx = unconditional_context.cat(&[context.clone()], Some(0));
-        let latent = self.model.call(
+        let latents = self.model.call(
             &latent.expand(vec![vec![2], latent.shape().dims[1..].to_vec()].concat()),
             timestep,
             Some(&ctx),
         );
 
-        let shape = latent
+        let shape = latents
             .shape()
             .dims
             .into_iter()
             .map(|s| s as usize)
             .collect::<Vec<usize>>();
-        let uncond_latent = latent.shrink([(0, 1), (0, shape[1]), (0, shape[2]), (0, shape[3])]);
-        let latent = latent.shrink([(1, 2), (0, shape[1]), (0, shape[2]), (0, shape[3])]);
+        let uncond_latent = latents.shrink([(0, 1), (0, shape[1]), (0, shape[2]), (0, shape[3])]);
+        let latent = latents.shrink([(1, 2), (0, shape[1]), (0, shape[2]), (0, shape[3])]);
         let e_t = &uncond_latent + &(unconditional_guidance_scale * &(&latent - &uncond_latent));
         e_t
     }
@@ -1180,18 +1185,23 @@ fn load_blocks(block_name: &str, blocks: Vec<&mut UnetComponent>, tensors: &Safe
                 bb.proj_out.bias = Some(tt(&format!("{block}.attentions.{atn}.proj_out.bias"), &tensors));
 
                 bb.transformer_block[0].attn1.to_q.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_q.weight"), &tensors));
-                //bb.transformer_block[0].attn1.to_q.bias = Some(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_q.bias"), &tensors));
+                bb.transformer_block[0].attn1.to_q.bias = None;
                 bb.transformer_block[0].attn1.to_k.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_k.weight"), &tensors));
-                //bb.transformer_block[0].attn1.to_k.bias = Some(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_k.bias"), &tensors));
+                bb.transformer_block[0].attn1.to_k.bias = None;
                 bb.transformer_block[0].attn1.to_v.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_v.weight"), &tensors));
-                //bb.transformer_block[0].attn1.to_v.bias = Some(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_v.bias"), &tensors));
+                bb.transformer_block[0].attn1.to_v.bias = None;
+                bb.transformer_block[0].attn1.to_out[0].weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_out.0.weight"), &tensors));
+                bb.transformer_block[0].attn1.to_out[0].bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_out.0.bias"), &tensors));
+
 
                 bb.transformer_block[0].attn2.to_q.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_q.weight"), &tensors));
-                //bb.transformer_block[0].attn2.to_q.bias = Some(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_q.bias"), &tensors));
+                bb.transformer_block[0].attn2.to_q.bias = None;
                 bb.transformer_block[0].attn2.to_k.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_k.weight"), &tensors));
-                //bb.transformer_block[0].attn2.to_k.bias = Some(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_k.bias"), &tensors));
+                bb.transformer_block[0].attn2.to_k.bias = None;
                 bb.transformer_block[0].attn2.to_v.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_v.weight"), &tensors));
-                //bb.transformer_block[0].attn2.to_v.bias = Some(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_v.bias"), &tensors));
+                bb.transformer_block[0].attn2.to_v.bias = None;
+                bb.transformer_block[0].attn2.to_out[0].weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_out.0.weight"), &tensors));
+                bb.transformer_block[0].attn2.to_out[0].bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_out.0.bias"), &tensors));
 
                 bb.transformer_block[0].ff.geglu.proj.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.0.proj.weight"), &tensors));
                 bb.transformer_block[0].ff.geglu.proj.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.0.proj.bias"), &tensors));
@@ -1483,7 +1493,7 @@ fn main() {
     load_vae(&mut model.first_stage_model);
     load_unet(&mut model.model);
     let tokenizer = Tokenizer::new();
-    let tokens = tokenizer.encode("a horse sized cat eating a bagel");
+    let tokens = tokenizer.encode("a cat");
     let prompt =
         Tensor::from(tokens.iter().map(|&e| e as f32).collect::<Vec<f32>>()).reshape([1, -1]);
     let context = model
@@ -1511,20 +1521,26 @@ fn main() {
     model.cond_stage_model = None;
 
     let steps = 5;
-    let guidence = 7.5;
+    let guidance = 7.5;
     let timesteps = (1..1000).step_by(1000 / steps);
-    let timesteps_tenor = Tensor::from(timesteps.clone().map(|s| s as f32).collect::<Vec<f32>>());
-    let alphas = v![model.alphas_comprod[i], for i in timesteps.clone().rev()];
-    //let mut alphas_prev = vec![alphas[..alphas.len() - 1].to_vec(), vec![1.0]].concat();
-    let mut alphas_prev = vec![0.15981644, 0.4228815, 0.7521434, 0.998296, 1.];
+    let alphas = v![model.alphas_comprod[i], for i in timesteps.clone()];
+    let mut alphas_prev = v![model.alphas_comprod[i], for i in timesteps.clone().rev().skip(1)];
+    alphas_prev.push(1.0);
+    alphas_prev.reverse();
 
-    let (w, h) = (32, 32);
+    let (w, h) = (64, 64);
     let mut latent = Tensor::randn([1, 4, w, h]);
 
-    for (index, timestep) in timesteps.enumerate() {
+    for (index, timestep) in timesteps.enumerate().rev() {
+        println!("step {index}");
         let tid = Tensor::_const(index as f32);
-        println!("alpha {}", alphas[index]);
-        println!("alpha_prev {}", alphas_prev[index]);
+        // println!("uncon_context\n{}", uncon_context.nd());
+        // println!("context\n{}", context.nd());
+        // println!("latent\n{}", latent.nd());
+        // println!("timestep\n{}", timestep);
+        // println!("alpha\n{}", alphas[index]);
+        // println!("alpha_prev\n{}", alphas_prev[index]);
+        // println!("guidence\n{}", guidance);
         latent = model.call(
             &uncon_context,
             &context,
@@ -1532,9 +1548,9 @@ fn main() {
             &Tensor::_const(timestep),
             &Tensor::_const(alphas[index]),
             &Tensor::_const(alphas_prev[index]),
-            &Tensor::_const(guidence),
+            &Tensor::_const(guidance),
         );
-        println!("step {index}");
+        // println!("{}", latent.nd());
     }
 
     let mut x = model.decode(&latent);

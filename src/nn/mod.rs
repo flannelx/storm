@@ -79,19 +79,6 @@ impl Conv2d {
     }
 }
 
-impl Sequential for Conv2d {
-    fn forward(&self, x: &Tensor, other: Option<SeqArgs>) -> Tensor {
-        x._conv2d(
-            &self.weights,
-            self.bias.as_ref(),
-            self.groups,
-            self.stride,
-            self.dilation,
-            self.padding.clone(),
-        )
-    }
-}
-
 pub struct Linear {
     pub weights: Tensor,
     pub bias: Option<Tensor>,
@@ -112,12 +99,6 @@ impl Linear {
     }
 
     pub fn call(&self, x: &Tensor) -> Tensor {
-        x.linear(&self.weights.t(), self.bias.as_ref())
-    }
-}
-
-impl Sequential for Linear {
-    fn forward(&self, x: &Tensor, other: Option<SeqArgs>) -> Tensor {
         x.linear(&self.weights.t(), self.bias.as_ref())
     }
 }
@@ -171,22 +152,6 @@ impl GroupNorm {
     }
 }
 
-impl Sequential for GroupNorm {
-    fn forward(&self, x: &Tensor, other: Option<SeqArgs>) -> Tensor {
-        let x = x
-            .reshape([x.shape()[0], self.num_groups as isize, -1])
-            .layernorm(None, Some(self.eps))
-            .reshape(x.shape());
-        if self.weights.is_none() || self.bias.is_none() {
-            x
-        } else {
-            let shape = vec![vec![1, -1], vec![1; x.shape().len() - 2]].concat();
-            &x * &self.weights.as_ref().unwrap().reshape(shape.clone())
-                + &self.bias.as_ref().unwrap().reshape(shape)
-        }
-    }
-}
-
 pub struct Embedding {
     pub vocab_size: usize,
     pub embed_size: usize,
@@ -205,30 +170,6 @@ impl Embedding {
     }
 
     pub fn call(&self, idx: &Tensor) -> Tensor {
-        if self.vocab_counter.is_none() {
-            unsafe {
-                *Arc::get_mut_unchecked(&mut self.vocab_counter.clone()) =
-                    Some(Tensor::arange(self.vocab_size as f32).reshape([1, 1, self.vocab_size]))
-            };
-        }
-        let [batch_size, seqlen] = idx.shape().dims[..] else {
-            panic!()
-        };
-        if seqlen == 0 {
-            Tensor::empty([batch_size, 0, self.embed_size as isize])
-        } else {
-            (*self.vocab_counter)
-                .as_ref()
-                .unwrap()
-                ._eq(&idx.unsqueeze(2))
-                .expand(vec![idx.shape().dims.clone(), vec![self.vocab_size as isize]].concat())
-                .matmul(&self.weight)
-        }
-    }
-}
-
-impl Sequential for Embedding {
-    fn forward(&self, idx: &Tensor, other: Option<SeqArgs>) -> Tensor {
         if self.vocab_counter.is_none() {
             unsafe {
                 *Arc::get_mut_unchecked(&mut self.vocab_counter.clone()) =
@@ -295,12 +236,6 @@ impl BatchNorm2d {
     }
 }
 
-impl Sequential for BatchNorm2d {
-    fn forward(&self, x: &Tensor, other: Option<SeqArgs>) -> Tensor {
-        todo!()
-    }
-}
-
 pub struct LayerNorm {
     pub normalized_shape: Vec<isize>,
     pub axis: Vec<isize>,
@@ -348,24 +283,4 @@ impl LayerNorm {
             x
         }
     }
-}
-
-impl Sequential for LayerNorm {
-    fn forward(&self, x: &Tensor, other: Option<SeqArgs>) -> Tensor {
-        let x = x.layernorm(Some(self.axis.clone()), Some(self.eps));
-        if self.elementwise_affine {
-            &x * self.weights.as_ref().unwrap() + self.bias.as_ref().unwrap()
-        } else {
-            x
-        }
-    }
-}
-
-pub enum SeqArgs {
-    Tensor(Tensor),
-    Context(Option<Tensor>),
-}
-
-pub trait Sequential {
-    fn forward(&self, x: &Tensor, other: Option<SeqArgs>) -> Tensor;
 }
