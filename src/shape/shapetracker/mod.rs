@@ -70,9 +70,14 @@ impl ShapeTracker {
         self.views.len() == 1 && self.views[0].contiguous
     }
 
-    pub fn shape(&self) -> Vec<isize> {
+    pub fn shape_vec(&self) -> Vec<isize> {
         self.views.last().unwrap().shape.clone()
     }
+
+    pub fn shape(&self) -> crate::tensor::shape::Shape {
+        self.views.last().unwrap().shape.clone().into()
+    }
+
     pub fn strides(&self) -> Vec<isize> {
         self.views.last().unwrap().strides.clone()
     }
@@ -104,7 +109,7 @@ impl ShapeTracker {
         };
         let mut ret = vec![None; last_view.shape.len()];
         let idxs: Vec<ArcNode> = self
-            .shape()
+            .shape_vec()
             .iter()
             .enumerate()
             .map(|(i, sh)| var(&format!("idx{}", i), 0, sh - 1))
@@ -169,7 +174,7 @@ impl ShapeTracker {
         let idxs = if let Some(i) = idxs {
             i
         } else {
-            self.shape()
+            self.shape_vec()
                 .iter()
                 .enumerate()
                 .map(|(i, sh)| var(&format!("idx{}", i), 0, sh - 1))
@@ -181,6 +186,40 @@ impl ShapeTracker {
             None,
         );
         self._expr_idx(idx, valid)
+
+        // let idxs = if let Some(i) = idxs {
+        //     i
+        // } else {
+        //     self.shape_vec()
+        //         .iter()
+        //         .enumerate()
+        //         .map(|(i, sh)| var(&format!("idx{}", i), 0, sh - 1))
+        //         .collect()
+        // };
+        // let (mut idx, mut valid) = _expr_view(&self.views[self.views.len() - 1], &idxs, None);
+        // // let idx = self.views[self.views.len() - 1].expr_idxs(&idxs);
+        // // let valid = self.views[self.views.len() - 1].expr_node_mask(
+        // //     idxs_to_idx(&self.views[self.views.len() - 1].shape, &idxs),
+        // //     None,
+        // // );
+        // //self._expr_idx(idx, valid)
+        // if self.views.len() > 1 {
+        //     for view in self.views[..self.views.len() - 2].iter().rev() {
+        //         if valid.max().unwrap() > 0 {
+        //             return (num(-1), valid);
+        //         }
+        //         let view = view.minify();
+        //         let mut acc = 1;
+        //         let mut idxs = vec![];
+        //         for d in view.shape.iter().rev() {
+        //             idxs.push((idx.clone() / num(acc)) % num(*d));
+        //             acc *= d;
+        //         }
+        //         idxs.reverse();
+        //         (idx, valid) = _expr_view(&view, &idxs, Some(valid));
+        //     }
+        // }
+        // (idx, valid)
     }
 
     pub fn expr_node(&self, idx: Option<ArcNode>) -> (ArcNode, ArcNode) {
@@ -200,7 +239,7 @@ impl ShapeTracker {
     }
 
     pub fn expr_node_str(&self, _idx: &str) -> (ArcNode, ArcNode) {
-        let idx = var("idx", 0, self.shape().iter().product());
+        let idx = var("idx", 0, self.shape_vec().iter().product());
         self._expr_idx(
             self.views[self.views.len() - 1].expr_node(Some(idx.clone())),
             self.views[self.views.len() - 1].expr_node_mask(idx, None),
@@ -265,4 +304,40 @@ impl ShapeTracker {
     pub fn unit_stride_axes(&self, ignore_valid: bool) -> Vec<isize> {
         crate::v![i as isize, for (i, st) in self.real_strides(ignore_valid).iter().enumerate(), if st.is_some_and(|s| s == 1)]
     }
+}
+
+fn _expr_view(view: &View, idxs: &[ArcNode], valid: Option<ArcNode>) -> (ArcNode, ArcNode) {
+    assert!(idxs.len() == view.shape.len());
+    let mut iexpr = vec![num(view.offset)];
+    let mut vexpr = if valid.is_some() {
+        vec![valid.unwrap()]
+    } else {
+        vec![]
+    };
+    for (idx, sh, st, m) in crate::izip!(
+        idxs,
+        view.shape.clone(),
+        view.strides.clone(),
+        if view.mask.is_some() {
+            view.mask
+                .clone()
+                .unwrap()
+                .into_iter()
+                .map(|s| Some(s))
+                .collect()
+        } else {
+            vec![None; view.shape.len()]
+        }
+    ) {
+        if sh != 1 && st != 0 {
+            iexpr.push(idx * st);
+        }
+        if let Some(mm) = m {
+            vexpr.extend([idx.ge(num(mm.0)), idx.lt(num(mm.1))]);
+        }
+    }
+    (
+        crate::shape::symbolic::sum(&iexpr),
+        crate::shape::symbolic::ands(&vexpr),
+    )
 }

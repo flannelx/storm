@@ -7,16 +7,16 @@ use std::{
 use crate::{
     codegen::linearizer::{Linearizer, LinearizerOptions},
     dtype::Dtype,
-    ops::LazyOp,
+    ops::{LazyOp, getenv},
     renderer::cstyle::{uops_to_cstyle, LanguageOpts, Renderer},
     shape::symbolic::NodeOp,
 };
 
 lazy_static::lazy_static! {
     pub static ref DEVICES: Vec<fn() -> anyhow::Result<Arc<dyn Device>>> = vec![
-        opencl::CLDevice::new,
-        #[cfg(any(linux, windows))]
+        #[cfg(target_arch = "x86_64")]
         cuda::CudaDevice::new,
+        opencl::CLDevice::new,
     ];
 }
 
@@ -67,7 +67,11 @@ pub trait Device: Send + Sync + core::fmt::Debug {
     }
     fn renderer(&self) -> Arc<dyn Renderer>;
     fn get_lin(&self, ast: LazyOp) -> Linearizer {
-        Linearizer::new(ast, Some(self.linearizer_opts()))
+        let mut ret = Linearizer::new(ast, Some(self.linearizer_opts()));
+        if getenv("OP", 0) == 1 {
+            ret.kernel.hand_coded_optim();
+        }
+        ret
     }
     fn render(&self, mut lin: Linearizer) -> (String, String) {
         lin.linearize();

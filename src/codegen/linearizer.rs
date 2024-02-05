@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::arg::Arg;
 use crate::codegen::kernel::{Buffers, LocalBuffer, KERNEL_CNT};
 use crate::ops::{Binary, LazyOp, LazyOpSrc, Reduce, Ternary, Unary};
-use crate::shape::symbolic::{iter_idxs, num, var, ArcNode, NodeOp};
+use crate::shape::symbolic::{iter_idxs, none_var, num, var, ArcNode, NodeOp};
 use crate::shape::ShapeTracker;
 use crate::tensor::shape::Shape;
 use crate::{dtype, lazy::LazyBuffer, ops::OpType};
@@ -83,11 +83,12 @@ pub struct UOp {
 
 #[derive(Clone, Debug)]
 pub struct LinearizerOptions {
-    support_float4: bool,
-    support_float4_alu: bool,
-    has_local: bool,
-    global_max: Option<Vec<isize>>,
-    local_max: Option<Vec<isize>>,
+    pub support_float4: bool,
+    pub support_float4_alu: bool,
+    pub has_local: bool,
+    pub has_share: bool,
+    pub global_max: Option<Vec<isize>>,
+    pub local_max: Option<Vec<isize>>,
 }
 
 impl Default for LinearizerOptions {
@@ -96,6 +97,7 @@ impl Default for LinearizerOptions {
             support_float4_alu: false,
             support_float4: false,
             has_local: true,
+            has_share: true,
             global_max: None,
             local_max: None,
         }
@@ -116,8 +118,8 @@ pub struct Linearizer {
     // group_for_reduce: Vec<isize>,
     pub kernel: Kernel,
     pub uops: Vec<UOp>,
-    pub buf_ops: Vec<Option<UOp>>,
-    pub loop_ops: HashMap<String, UOp>,
+    pub buf_uops: Vec<Option<UOp>>,
+    pub loop_uops: HashMap<String, UOp>,
     pub name: String,
     pub saved_exprs: HashMap<(UOps, Option<Dtype>, Vec<UOp>, Vec<Arg>), UOp>,
     pub global_size: Option<Vec<usize>>,
@@ -130,8 +132,8 @@ impl Linearizer {
         Self {
             kernel: Kernel::new(ast, opts),
             uops: Default::default(),
-            buf_ops: Default::default(),
-            loop_ops: Default::default(),
+            buf_uops: Default::default(),
+            loop_uops: Default::default(),
             name: "".into(),
             saved_exprs: HashMap::new(),
             global_size: None,
@@ -147,8 +149,8 @@ impl Linearizer {
         let mut upc_backup = self.kernel.upcasted;
         self.saved_exprs = HashMap::new();
         self.uops = vec![];
-        self.buf_ops = vec![None; self.kernel.bufs.len()];
-        self.loop_ops = HashMap::new();
+        self.buf_uops = vec![None; self.kernel.bufs.len()];
+        self.loop_uops = HashMap::new();
         for i in 0..self.kernel.bufs.len() {
             let buf = &self.kernel.bufs[i];
             if let Buffers::MemBuffer(buffer) = buf {
@@ -159,7 +161,7 @@ impl Linearizer {
                     vec![],
                     vec![a],
                 );
-                self.buf_ops[i] = Some(uop);
+                self.buf_uops[i] = Some(uop);
             }
         }
         // # add var vals
@@ -169,7 +171,12 @@ impl Linearizer {
         // for lb in self.local_alias.values():
         //   self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size()))
 
-        // self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
+        // self.sts.append(ShapeTracker.from_shape(tuple(
+        // [1] * self.global_dims +
+        // list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) +
+        // [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) +
+        // [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
+        //
         // self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
         // self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ("temp", self.sts[-1].size())))
         //
@@ -177,8 +184,7 @@ impl Linearizer {
         // self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)
         // ]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce)
         // + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-        if !self.kernel.group_for_reduce.is_empty() {
-            println!("===============================");
+        if self.kernel.group_for_reduce.len() > 0 {
             self.kernel.sts.push(ShapeTracker::from_shape(
                 &vec![
                     &vec![1; self.kernel.global_dims() as usize],
@@ -196,21 +202,23 @@ impl Linearizer {
                 ]
                 .concat(),
             ));
-            self.kernel.bufs.push(
-                LocalBuffer {
-                    name: "tmp".into(),
-                    size: self.kernel.sts.last().unwrap().size() as usize - 1,
-                    dtype: float32,
-                    realized: None,
-                }
-                .into(),
+            let tmp_buf = LocalBuffer {
+                name: "tmp".into(),
+                size: self.kernel.sts.last().unwrap().size() as usize - 1,
+                dtype: float32,
+                realized: None,
+            };
+            self.kernel.bufs.push(tmp_buf.clone().into());
+            let uop = self.uop(
+                UOps::DEFINE_LOCAL,
+                Some(float32),
+                vec![],
+                vec![Arg::Buffer(tmp_buf.into())],
+                true,
+                None,
+                true,
             );
-            //self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ("temp", self.sts[-1].size())))
-
-            let a1 = Arg::Str("temp".into());
-            let a2 = Arg::Usize(self.kernel.sts.last().unwrap().size() as usize);
-            let buf_uop = self.uop_default(UOps::DEFINE_LOCAL, Some(float32), vec![], vec![a1, a2]);
-            self.buf_ops.push(Some(buf_uop))
+            self.buf_uops.push(Some(uop));
         }
 
         let name = if self.kernel.reduceop.is_some() {
@@ -241,8 +249,8 @@ impl Linearizer {
                 ..self.kernel.first_reduce() as usize + self.kernel.group_for_reduce.len()],
             if self.kernel.opts.has_local { 3 } else { 0 },
         );
-        let full_upcast_idxs = v![var("", 0, s-1), for s in self.kernel.full_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
-        let upcast_idxs = v![var("", 0, s-1), for s in self.kernel.output_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
+        let full_upcast_idxs = v![none_var(0, s-1), for s in self.kernel.full_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
+        let upcast_idxs = v![none_var(0, s-1), for s in self.kernel.output_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
 
         self.global_size = None;
         self.local_size = None;
@@ -266,7 +274,7 @@ impl Linearizer {
                     ),
                 );
             }
-            self.loop_ops.extend(extend_loop_uops);
+            self.loop_uops.extend(extend_loop_uops);
         } else if self.kernel.opts.has_local {
             self.global_size =
                 Some(v![(x.max().unwrap() + 1 ) as usize, for x in loop_global_idxs.iter().rev()]);
@@ -290,7 +298,7 @@ impl Linearizer {
                     ),
                 );
             }
-            self.loop_ops.extend(extend_loop_uops);
+            self.loop_uops.extend(extend_loop_uops);
 
             let mut extend_loop_uops = HashMap::new();
             for (i, x) in loop_local_idxs.iter().enumerate() {
@@ -308,7 +316,7 @@ impl Linearizer {
                     ),
                 );
             }
-            self.loop_ops.extend(extend_loop_uops);
+            self.loop_uops.extend(extend_loop_uops);
         } else {
             self.render_loop(&vec![loop_global_idxs.clone(), loop_local_idxs.clone()].concat());
         }
@@ -369,7 +377,6 @@ impl Linearizer {
 
             //lb_ex = {b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs}
             let lb_ex = v![(b, self.global_load(i, vec![global_idx.clone(), local_idxs.clone(), reduce_idxs.clone(), full_upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_];
-            //panic!();
             loaded_buffers.extend(lb_ex);
             // run early ast with reduce
             //panic!("self.kernel.reduceop {:?}", self.kernel.reduceop.as_ref().unwrap().optype);
@@ -380,6 +387,7 @@ impl Linearizer {
                 &loaded_buffers,
                 true,
                 Some(&loop_ctx),
+                None,
             );
 
             self.load_cache.clear();
@@ -410,6 +418,7 @@ impl Linearizer {
             None,
             &loaded_buffers,
             false,
+            None,
             None,
         );
         self.global_store(
@@ -443,13 +452,17 @@ impl Linearizer {
             } else if !matches!(u.uop, UOps::CONST | UOps::ALU | UOps::CAST | UOps::LOAD) {
                 loop_stack.last_mut().unwrap().push(u.clone())
             } else {
-                let parents = get_recursive_parents(u.clone(), &acc_scope, true);
-                for i in (0..loop_stack.len()).rev() {
-                    if v![0, for x in loop_stack[i].iter(), if parents.contains(x)].len() > 0
-                        || i == 0
-                    {
-                        loop_stack[i].push(u.clone());
-                        break;
+                let parents = get_recursive_parents(u.clone(), &mut acc_scope, true);
+                if any(&v![u.uop == UOps::DEFINE_LOCAL, for u in parents.iter()]) {
+                    loop_stack.last_mut().unwrap().push(u.clone());
+                } else {
+                    for i in (0..loop_stack.len()).rev() {
+                        if v![0, for x in loop_stack[i].iter(), if parents.contains(x)].len() > 0
+                            || i == 0
+                        {
+                            loop_stack[i].push(u.clone());
+                            break;
+                        }
                     }
                 }
             }
@@ -586,7 +599,7 @@ impl Linearizer {
             //}
         }
         let ret = new_loops.values().map(|x| x.clone()).collect();
-        self.loop_ops.extend(new_loops);
+        self.loop_uops.extend(new_loops);
         ret
     }
 
@@ -653,7 +666,7 @@ impl Linearizer {
                             vec![Arg::OpType(OpType::Binary(Binary::Sub))],
                             cachable,
                             insert_before,
-                            simplify,
+                            true,
                         );
                     }
                     if op == Unary::Neg && vin[0].uop == UOps::CONST {
@@ -767,7 +780,16 @@ impl Linearizer {
         }
 
         let expand_vars = v![rename_var(idx.expand_idx(), &format!("_uidx{j}")), for (j, idx) in idxs.iter().enumerate()];
-        let fake_idxs = v![idx.substitute(&HashMap::from([(idx.expand_idx(), ev.clone())])), for (idx, ev) in izip!(idxs.iter(), expand_vars.iter())];
+        let fake_idxs = v![
+        {
+            let eidx = idx.expand_idx();
+            if eidx.is_var() {
+                idx.substitute(&HashMap::from([(idx.expand_idx(), ev.clone())]))
+            } else {
+                idx.clone()
+            }
+        }
+        ,for (idx, ev) in izip!(idxs.iter(), expand_vars.iter())];
         let (mut g_idx, mut g_valid) = if let Some(d) = dim {
             let d = d as usize;
             let (mut gidx, mut gvalid) = self.kernel.sts[i].expr_idxs(Some(
@@ -850,8 +872,8 @@ impl Linearizer {
                         self.load_cache.insert(key.clone(), tmp);
                     }
                 } else {
-                    assert!(self.buf_ops[i].is_some(), "buffer {i} wasn't UOped");
-                    let buf_uop = self.buf_ops[i].clone().unwrap();
+                    assert!(self.buf_uops[i].is_some(), "buffer {i} wasn't UOped");
+                    let buf_uop = self.buf_uops[i].clone().unwrap();
                     // WARN: This seem to be always empty
                     // valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
                     // panic!("{:?}", idx.render_default());
@@ -896,15 +918,15 @@ impl Linearizer {
 
     fn global_store(&mut self, i: isize, idxs: Vec<ArcNode>, store: Vec<UOp>) -> Vec<UOp> {
         let i = if i < 0 {
-            (self.kernel.bufs.len() as isize - i) as usize
+            (self.kernel.bufs.len() as isize + i) as usize
         } else {
             i as usize
         };
         let buf = &self.kernel.bufs[i];
-        let buf_uop = self.buf_ops[i].clone();
+        let buf_uop = self.buf_uops[i].clone();
         assert!(buf_uop.is_some(), "buffer {i} wasn't UOped");
         let expanded_node = v![idx.expand(None), for idx in idxs.iter()];
-        let mut _idxs = v![x.iter().rev().map(|n| n.clone()).collect::<Vec<ArcNode>>(), for x in cartesian_product(expanded_node.clone().into_iter().rev().collect())];
+        let mut _idxs = v![x.into_iter().rev().collect::<Vec<ArcNode>>(), for x in cartesian_product(expanded_node.clone().into_iter().rev().collect())];
         if _idxs.len() == 0 {
             _idxs = vec![vec![]];
         }
@@ -945,7 +967,7 @@ impl Linearizer {
     fn get_upcast_dim(&self, i: usize) -> Vec<isize> {
         let should_upcast = self.kernel.opts.support_float4
             && matches!(self.kernel.bufs[i].dtype(), float32 | float16);
-        v![x, for x in self.kernel.sts[i].unit_stride_axes(false), if should_upcast && x >= self.kernel.shape_len()-self.kernel.upcasted && Shape::from(self.kernel.sts[i].shape())[x] > 1]
+        v![x, for x in self.kernel.sts[i].unit_stride_axes(false), if should_upcast && x >= self.kernel.shape_len()-self.kernel.upcasted && Shape::from(self.kernel.sts[i].shape_vec())[x] > 1]
     }
 
     fn ast_parse(
@@ -956,7 +978,13 @@ impl Linearizer {
         loaded_buffers: &HashMap<Buffers, Vec<UOp>>,
         do_reduce: bool,
         loop_ctx: Option<&[UOp]>,
+        cache: Option<&mut HashMap<LazyOp, Vec<UOp>>>,
     ) -> Vec<UOp> {
+        let mut map = HashMap::new();
+        let cache = cache.unwrap_or(&mut map);
+        if cache.contains_key(&x) {
+            return cache[&x].clone()
+        }
         match &x.optype {
             OpType::Buffer(_) => return loaded_buffers[&x.args[0].to_buf()].clone(),
             OpType::Reduce(b) => {
@@ -968,8 +996,7 @@ impl Linearizer {
                         // TODO: UnaryOps.Cast
                         // if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:  # noqa: E501
                         //   x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
-                        if x.src[0].optype() == Binary::Mul
-                        {
+                        if x.src[0].optype() == Binary::Mul {
                             x = LazyOp::new(
                                 OpType::Ternary(Ternary::Mulacc),
                                 x.src[0].src(),
@@ -982,21 +1009,7 @@ impl Linearizer {
             }
             _ => (),
         }
-        // for v in x.src.iter() {
-        //     assert!(
-        //         self.ast_parse(
-        //             v.lo().clone(),
-        //             acc,
-        //             offs,
-        //             loaded_buffers,
-        //             do_reduce,
-        //             loop_ctx
-        //         )
-        //         .len()
-        //             > 0
-        //     );
-        // }
-        let values = v![self.ast_parse(v.lo().clone(), acc, offs, loaded_buffers, do_reduce, loop_ctx), for v in x.src.iter()];
+        let values = v![self.ast_parse(v.lo().clone(), acc, offs, loaded_buffers, do_reduce, loop_ctx, Some(cache)), for v in x.src.iter()];
         let ops = HashMap::from([
             (OpType::Reduce(Reduce::Sum), OpType::Binary(Binary::Add)),
             (OpType::Reduce(Reduce::Max), OpType::Binary(Binary::Max)),
@@ -1006,14 +1019,6 @@ impl Linearizer {
             ),
         ]);
         let mut ret = vec![];
-        // let values_transpose = (0..values.len())
-        //     .map(|i| {
-        //         values
-        //             .iter()
-        //             .map(|row| row[i].clone())
-        //             .collect::<Vec<UOp>>()
-        //     })
-        //     .collect::<Vec<Vec<UOp>>>();
         let mut values_transpose = vec![vec![None; values.len()]; values[0].len()];
         for r in 0..values.len() {
             for c in 0..values[0].len() {
@@ -1058,6 +1063,7 @@ impl Linearizer {
         } else {
             ret = v![self.uop(UOps::ALU, if x.optype == Binary::Cmplt { Some(_bool)} else {Some(float32)}, val.clone(),vec![Arg::OpType(x.optype.clone())], true, None, true), for val in values_transpose.iter()];
         }
+        cache.insert(x.clone(), ret.clone());
         ret
     }
 
@@ -1094,14 +1100,14 @@ impl Linearizer {
             return vec![0];
         }
         let upcasted_i = self.kernel.upcasted_axis(i);
-
-        //acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
         let r_upcasted_i = upcasted_i
             .iter()
             .rev()
             .map(|c| c.clone())
             .collect::<Vec<Vec<isize>>>();
-        let acc_strides = v![x*(1-r_upcasted_i[i][2]), for (i, x) in strides_for_shape(&v![if ui[2] > 0 { 1 } else { ui[1] }, for ui in upcasted_i.iter()]).into_iter().enumerate()];
+
+        //acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
+        let acc_strides = v![x*(1-r_upcasted_i[i][2]), for (i, x) in strides_for_shape(&v![if ui[2] > 0 { 1 } else { ui[0] }, for ui in r_upcasted_i.iter()]).into_iter().enumerate()];
         //return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
         v![t.iter().sum::<isize>(), for t in cartesian_product(v![v![y*acc_strides[i], for y in 0..x[0]], for (i, x) in r_upcasted_i.iter().enumerate()])]
     }
@@ -1160,84 +1166,6 @@ pub fn rename_var(v: ArcNode, expr: &str) -> ArcNode {
     var(expr, v.min().unwrap(), v.max().unwrap())
 }
 
-// #[allow(unused_variables)]
-// pub trait NodeOp: 'static + core::fmt::Debug {
-//     fn variable(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         // Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}]" if ctx == "DEBUG" else f"{self.expr}",
-//         if ctx.is_some_and(|f| f == "DEBUG") {
-//             return format!(
-//                 "{}[{}-{}]",
-//                 s.expr().unwrap(),
-//                 s.min().unwrap(),
-//                 s.max().unwrap()
-//             );
-//         }
-//         s.expr().unwrap().to_string()
-//     }
-//
-//     fn num(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         // NumNode: lambda self,ops,ctx: f"{self.b}",
-//         s.b().unwrap().to_string()
-//     }
-//
-//     fn mul(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         // MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",
-//         format!(
-//             "({}*{})",
-//             s.a().unwrap().render(self.to_arc(), ctx, false),
-//             s.b().unwrap().render(self.to_arc(), ctx, false), // <-- Everything should be a Node here,
-//                                                               // so no need to "sym_render()"
-//         )
-//     }
-//
-//     fn div(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         // DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}/{self.b})",
-//         format!(
-//             "({}/{})",
-//             s.a().unwrap().render(self.to_arc(), ctx, false),
-//             s.b().unwrap()
-//         )
-//     }
-//
-//     fn _mod(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         // ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
-//         format!(
-//             "({}%{})",
-//             s.a().unwrap().render(self.to_arc(), ctx, false),
-//             s.b().unwrap()
-//         )
-//     }
-//
-//     fn lt(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         //LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{sym_render(self.b,ops,ctx)})",
-//         format!(
-//             "({}<{})",
-//             s.a().unwrap().render(self.to_arc(), ctx, false),
-//             s.b().unwrap().render(self.to_arc(), ctx, false),
-//         )
-//     }
-//
-//     fn sum(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         let mut renders = vec![];
-//         for n in s.nodes() {
-//             renders.push(n.render(self.to_arc(), ctx, false));
-//         }
-//         renders.sort();
-//         format!("({})", renders.join("+"))
-//     }
-//
-//     fn and(&self, s: ArcNode, ctx: Option<&str>) -> String {
-//         let mut renders = vec![];
-//         for n in s.nodes() {
-//             renders.push(n.render(self.to_arc(), ctx, false));
-//         }
-//         renders.sort();
-//         format!("({})", renders.join("&&"))
-//     }
-//
-//     fn to_arc(&self) -> Arc<dyn NodeOp>;
-// }
-
 impl Linearizer {
     pub fn uop_alu_idx(&mut self, a: UOp, b: ArcNode, op: OpType, dtype: Option<Dtype>) -> UOp {
         let b = self.render(b);
@@ -1262,7 +1190,7 @@ impl Linearizer {
                 let a = self.render(node.a().unwrap());
                 self.uop_alu_idx(a, node.b().unwrap(), OpType::Binary(Binary::Cmplt), None)
             }
-            "Variable" => self.loop_ops[node.expr().unwrap()].clone(),
+            "Variable" => self.loop_uops[node.expr().unwrap()].clone(),
             "NumNode" => self.const_idx(node.num_val().unwrap().to_string(), None),
             "SumNode" => {
                 let nodes = node.nodes();
@@ -1289,7 +1217,7 @@ impl Linearizer {
 
 fn get_recursive_parents(
     x: UOp,
-    acc_scope: &HashMap<UOp, Vec<UOp>>,
+    acc_scope: &mut HashMap<UOp, Vec<UOp>>,
     with_phi: bool,
 ) -> HashSet<UOp> {
     let mut ret = HashSet::from_iter(x.vin.clone());
@@ -1302,7 +1230,7 @@ fn get_recursive_parents(
     }
     if with_phi && acc_scope.get(&x).is_some() {
         ret = ret
-            .union(&HashSet::from_iter(acc_scope[&x].clone()))
+            .union(&HashSet::from_iter(acc_scope.entry(x).or_default().clone()))
             .map(|s| s.clone())
             .collect::<HashSet<UOp>>();
     }

@@ -14,6 +14,7 @@ pub mod ops;
 pub mod renderer;
 pub mod shape;
 pub mod tensor;
+pub mod utils;
 
 #[derive(Debug, Clone)]
 pub struct DebugStruct(HashSet<String>);
@@ -31,5 +32,6 @@ pub mod prelude {
     pub use crate::nn::optim::*;
     pub use crate::tensor::{Tensor, TensorDefaultType};
     pub use crate::DEBUG;
+    pub use crate::utils::*;
     pub use num_traits::{AsPrimitive, Bounded, Float, FromPrimitive, Num, ToPrimitive, NumOps};
 }

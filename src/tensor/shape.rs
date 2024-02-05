@@ -154,13 +154,31 @@ impl Index<std::ops::Range<isize>> for Shape {
     fn index(&self, index: std::ops::Range<isize>) -> &Self::Output {
         let len = self.dims.len() as isize;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &self.dims[start..end]
@@ -171,13 +189,31 @@ impl core::ops::IndexMut<std::ops::Range<isize>> for Shape {
     fn index_mut(&mut self, index: std::ops::Range<isize>) -> &mut Self::Output {
         let len = self.dims.len() as isize;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &mut self.dims[start..end]
@@ -189,13 +225,31 @@ impl Index<std::ops::RangeTo<isize>> for Shape {
     fn index(&self, index: std::ops::RangeTo<isize>) -> &Self::Output {
         let len = self.dims.len() as isize;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &self.dims[start..end]
@@ -206,13 +260,31 @@ impl core::ops::IndexMut<std::ops::RangeTo<isize>> for Shape {
     fn index_mut(&mut self, index: std::ops::RangeTo<isize>) -> &mut Self::Output {
         let len = self.dims.len() as isize;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &mut self.dims[start..end]
@@ -224,13 +296,31 @@ impl Index<std::ops::RangeFrom<isize>> for Shape {
     fn index(&self, index: std::ops::RangeFrom<isize>) -> &Self::Output {
         let len = self.dims.len() as isize;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i as isize + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i as isize + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i as isize + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &self.dims[start..end]
@@ -241,32 +331,67 @@ impl core::ops::IndexMut<std::ops::RangeFrom<isize>> for Shape {
     fn index_mut(&mut self, index: std::ops::RangeFrom<isize>) -> &mut Self::Output {
         let len = self.dims.len() as isize;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i as isize + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i as isize + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i as isize + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &mut self.dims[start..end]
     }
 }
 
-
 impl Index<std::ops::Range<i32>> for Shape {
     type Output = [isize];
     fn index(&self, index: std::ops::Range<i32>) -> &Self::Output {
-        let len = self.dims.len() as isize;
+        let len = self.dims.len() as i32;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &self.dims[start..end]
@@ -275,15 +400,33 @@ impl Index<std::ops::Range<i32>> for Shape {
 
 impl core::ops::IndexMut<std::ops::Range<i32>> for Shape {
     fn index_mut(&mut self, index: std::ops::Range<i32>) -> &mut Self::Output {
-        let len = self.dims.len() as isize;
+        let len = self.dims.len() as i32;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &mut self.dims[start..end]
@@ -293,15 +436,33 @@ impl core::ops::IndexMut<std::ops::Range<i32>> for Shape {
 impl Index<std::ops::RangeTo<i32>> for Shape {
     type Output = [isize];
     fn index(&self, index: std::ops::RangeTo<i32>) -> &Self::Output {
-        let len = self.dims.len() as isize;
+        let len = self.dims.len() as i32;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &self.dims[start..end]
@@ -310,15 +471,33 @@ impl Index<std::ops::RangeTo<i32>> for Shape {
 
 impl core::ops::IndexMut<std::ops::RangeTo<i32>> for Shape {
     fn index_mut(&mut self, index: std::ops::RangeTo<i32>) -> &mut Self::Output {
-        let len = self.dims.len() as isize;
+        let len = self.dims.len() as i32;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &mut self.dims[start..end]
@@ -328,15 +507,33 @@ impl core::ops::IndexMut<std::ops::RangeTo<i32>> for Shape {
 impl Index<std::ops::RangeFrom<i32>> for Shape {
     type Output = [isize];
     fn index(&self, index: std::ops::RangeFrom<i32>) -> &Self::Output {
-        let len = self.dims.len() as isize;
+        let len = self.dims.len() as i32;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &self.dims[start..end]
@@ -345,21 +542,38 @@ impl Index<std::ops::RangeFrom<i32>> for Shape {
 
 impl core::ops::IndexMut<std::ops::RangeFrom<i32>> for Shape {
     fn index_mut(&mut self, index: std::ops::RangeFrom<i32>) -> &mut Self::Output {
-        let len = self.dims.len() as isize;
+        let len = self.dims.len() as i32;
         let start = match index.start_bound() {
-            std::ops::Bound::Included(&i) => panic!(),
-            std::ops::Bound::Excluded(&i) => i as isize + len,
+            std::ops::Bound::Included(&i) => if i < 0 { i + len } else { i },
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => 0,
         } as usize;
         let end = match index.end_bound() {
-            std::ops::Bound::Included(&i) => i as isize + len,
-            std::ops::Bound::Excluded(&i) => i as isize + len + 1,
+            std::ops::Bound::Included(&i) => {
+                if i < 0 {
+                    i + len + 1
+                } else {
+                    i + 1
+                }
+            }
+            std::ops::Bound::Excluded(&i) => {
+                if i < 0 {
+                    i + len
+                } else {
+                    i
+                }
+            }
             std::ops::Bound::Unbounded => len,
         } as usize;
         &mut self.dims[start..end]
     }
 }
-
 
 impl Index<std::ops::RangeTo<usize>> for Shape {
     type Output = [isize];
@@ -370,6 +584,19 @@ impl Index<std::ops::RangeTo<usize>> for Shape {
 
 impl core::ops::IndexMut<std::ops::RangeTo<usize>> for Shape {
     fn index_mut(&mut self, index: std::ops::RangeTo<usize>) -> &mut Self::Output {
+        &mut self.dims[index]
+    }
+}
+
+impl Index<std::ops::RangeFull> for Shape {
+    type Output = [isize];
+    fn index(&self, index: std::ops::RangeFull) -> &Self::Output {
+        &self.dims[index]
+    }
+}
+
+impl core::ops::IndexMut<std::ops::RangeFull> for Shape {
+    fn index_mut(&mut self, index: std::ops::RangeFull) -> &mut Self::Output {
         &mut self.dims[index]
     }
 }

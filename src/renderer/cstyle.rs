@@ -400,7 +400,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                     //println!(">>{val} {:?}", args[0]);
                 }
                 assert!(child_count[&u] != 0);
-                if child_count[&u] <= 1 || dtype.is_int() {
+                if child_count[&u] <= 1 && args[0].to_op() != Binary::Max {
                     r.insert(u.clone(), val);
                 } else {
                     kk(

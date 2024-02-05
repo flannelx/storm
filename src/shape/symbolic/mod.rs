@@ -1,5 +1,6 @@
 pub mod core_ops;
 
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::{cmp::PartialEq, collections::HashMap, sync::Arc};
 
@@ -236,7 +237,7 @@ pub trait Node: core::fmt::Debug {
     }
 
     fn expand_idx(&self) -> ArcNode {
-        crate::v![v, for v in self.nodes(), if v.expr().is_none()]
+        crate::v![v, for v in self.vars(), if v.expr().is_none()]
             .into_iter()
             .next()
             .unwrap_or(num(0))
@@ -246,7 +247,7 @@ pub trait Node: core::fmt::Debug {
         if idxs.is_none() {
             idxs = Some(vec![self.expand_idx()])
         }
-        v![self.substitute(&HashMap::from_iter(izip!(idxs.as_ref().unwrap().clone(), v![num(x as isize), for x in rep]))), for rep in iter_idxs(idxs.as_ref().unwrap().as_ref())]
+        v![self.substitute(&HashMap::from_iter(v![(k, v), for (k, v) in izip!(idxs.as_ref().unwrap().clone(), v![num(x as isize), for x in rep]), if k.is_var()])), for rep in iter_idxs(idxs.as_ref().unwrap().as_ref())]
     }
 
     fn substitute(&self, var_vars: &HashMap<ArcNode, ArcNode>) -> ArcNode {
@@ -288,7 +289,10 @@ pub fn gcd(mut n: isize, mut m: isize) -> isize {
 }
 
 pub fn var(expr: &str, min: isize, max: isize) -> ArcNode {
-    create_node(Variable::new(expr, min, max))
+    create_node(Variable::new(Some(expr.to_string()), min, max))
+}
+pub fn none_var(min: isize, max: isize) -> ArcNode {
+    create_node(Variable::new(None, min, max))
 }
 
 pub fn num(v: isize) -> ArcNode {
@@ -405,15 +409,15 @@ pub fn factorize(nodes: Vec<ArcNode>) -> Vec<ArcNode> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Variable {
-    expr: String,
+    expr: Option<String>,
     min: isize,
     max: isize,
 }
 
 impl Variable {
-    fn new(expr: &str, min: isize, max: isize) -> ArcNode {
+    fn new(expr: Option<String>, min: isize, max: isize) -> ArcNode {
         ArcNode(Arc::new(Self {
-            expr: expr.to_string(),
+            expr,
             min,
             max,
         }))
@@ -443,7 +447,7 @@ impl Node for Variable {
     }
 
     fn expr(&self) -> Option<&str> {
-        Some(&self.expr)
+        self.expr.as_ref().map(|s| s.as_str())
     }
 
     fn min(&self) -> Option<isize> {
@@ -510,6 +514,7 @@ impl Node for SumNode {
         for n in self.nodes.iter() {
             ret.extend(n.vars());
         }
+        ret.dedup();
         ret
     }
 
@@ -724,7 +729,9 @@ impl Node for MulNode {
     }
 
     fn vars(&self) -> Vec<ArcNode> {
-        vec![self.a.vars(), self.b.vars()].concat()
+        let mut ret = vec![self.a.vars(), self.b.vars()].concat();
+        ret.dedup();
+        ret
     }
     fn get_bounds(&self) -> Option<(isize, isize)> {
         let b = if self.b.is_num() {
@@ -901,7 +908,9 @@ impl Node for DivNode {
     }
 
     fn vars(&self) -> Vec<ArcNode> {
-        vec![self.a.vars(), self.b.vars()].concat()
+        let mut ret = vec![self.a.vars(), self.b.vars()].concat();
+        ret.dedup();
+        ret
     }
     fn to_arc(&self) -> ArcNode {
         ArcNode(Arc::new(Self {
@@ -1041,7 +1050,9 @@ impl Node for LtNode {
     }
 
     fn vars(&self) -> Vec<ArcNode> {
-        vec![self.a.vars(), self.b.vars()].concat()
+        let mut ret = vec![self.a.vars(), self.b.vars()].concat();
+        ret.dedup();
+        ret
     }
 }
 
@@ -1072,7 +1083,9 @@ impl Node for ModNode {
     }
 
     fn vars(&self) -> Vec<ArcNode> {
-        vec![self.a.vars(), self.b.vars()].concat()
+        let mut ret = vec![self.a.vars(), self.b.vars()].concat();
+        ret.dedup();
+        ret
     }
 
     fn a(&self) -> Option<ArcNode> {
@@ -1180,6 +1193,7 @@ impl Node for AndNode {
         for n in self.nodes.iter() {
             ret.extend(n.vars());
         }
+        ret.dedup();
         ret
     }
 
@@ -1238,7 +1252,7 @@ pub trait NodeOp: 'static + core::fmt::Debug {
                 s.max().unwrap()
             );
         }
-        s.expr().unwrap().to_string()
+        s.expr().unwrap_or("None").to_string()
     }
 
     fn num(&self, s: ArcNode, ctx: Option<&str>) -> String {

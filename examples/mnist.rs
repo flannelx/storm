@@ -42,7 +42,7 @@ impl ConvNet {
         let mut x = x.reshape([-1, 1, 28, 28]);
         x = self.c1.call(&x).relu().max_pool2d();
         x = self.c2.call(&x).relu().max_pool2d();
-        x = x.reshape([x.shape()[0], -1]);
+        x = x.reshape([x.shape()[0isize], -1]);
         x = self.l1.call(&x).log_softmax();
         x
     }

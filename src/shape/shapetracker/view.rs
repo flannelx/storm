@@ -209,7 +209,7 @@ impl View {
         if self.shape == new_shape {
             return Some(self.clone());
         }
-        assert!(new_shape.iter().all(|&sh| sh > 0));
+        assert!(new_shape.iter().all(|&sh| sh > 0), "{:?}", new_shape);
         if self.shape.contains(&0) {
             assert!(
                 new_shape.contains(&0),
@@ -357,6 +357,15 @@ impl View {
             None
         };
         View::new(&new_shape, Some(strides), Some(offset), mask)
+    }
+
+    pub fn minify(&self) -> View {
+        let min_shape = v![x.0, for x in _merge_dims(&self.shape, &self.strides, self.mask.clone())];
+        if let Some(v) = self.reshape(&min_shape) {
+            v
+        } else {
+            self.clone()
+        }
     }
 }
 

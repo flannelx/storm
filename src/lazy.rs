@@ -126,7 +126,7 @@ impl LazyBuffer {
         let mut ret = Self {
             device: device.into(),
             lazyop: op.into(),
-            shape: st.shape(),
+            shape: st.shape_vec(),
             st: st.into(),
             // children: HashSet::new(),
             // views: HashSet::new(),
@@ -503,14 +503,14 @@ impl LazyBuffer {
         //     //     _ => unreachable!(),
         //     // };
         // }
-        assert!(!st.shape().is_empty());
+        assert!(!st.shape_vec().is_empty());
         if !self.is_realized() && st.contiguous() {
             let root = get_movementroot(&*self, false);
             if root.st.contiguous()
                 && root != self
-                && st.shape().iter().product::<isize>() == root.shape.iter().product::<isize>()
+                && st.shape_vec().iter().product::<isize>() == root.shape.iter().product::<isize>()
             {
-                return root.reshape(&st.shape());
+                return root.reshape(&st.shape_vec());
             }
         }
         create_lazybuffer(
@@ -1138,7 +1138,7 @@ impl FlopCounter {
 
     fn buffer_load(arg: &Buffers) -> Self {
         Self {
-            shape: arg.st().shape(),
+            shape: arg.st().shape_vec(),
             dtype: arg.dtype(),
             flops: 0.,
             mem: HashMap::from([(arg.idx(), arg.dtype().size * arg.st().size() as usize)]),
@@ -1146,7 +1146,7 @@ impl FlopCounter {
     }
     fn buffer_const(arg: &Buffers) -> Self {
         Self {
-            shape: arg.st().shape(),
+            shape: arg.st().shape_vec(),
             dtype: arg.dtype(),
             flops: 0.,
             mem: HashMap::new(),
@@ -1154,7 +1154,7 @@ impl FlopCounter {
     }
     fn buffer_store(self, arg: &Buffers) -> Self {
         Self {
-            shape: arg.st().shape(),
+            shape: arg.st().shape_vec(),
             dtype: arg.dtype(),
             flops: self.flops,
             mem: self.mem,

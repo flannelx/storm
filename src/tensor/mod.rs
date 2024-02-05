@@ -105,7 +105,7 @@ impl Tensor {
         buffer.st = ShapeTracker::from_shape(&[(bytes.len()
             / dtype.size)
             as isize]);
-        buffer.shape = buffer.st.shape();
+        buffer.shape = buffer.st.shape_vec();
         buffer.dtype = dtype;
         Self {
             require_grad: false,

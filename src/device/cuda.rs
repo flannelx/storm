@@ -1,4 +1,4 @@
-#![cfg(any(linux, windows))]
+#![cfg(target_arch = "x86_64")]
 
 use cudarc::driver::result::malloc_sync;
 use cudarc::driver::sys::{

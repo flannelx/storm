@@ -155,10 +155,10 @@ mod test_index_expr_2d {
                 //     &st.shape(),
                 //     &st.views.last().unwrap().offset,
                 // );
-                assert!(node_expr(Self::default_idx(&st.shape())) == st.expr_node(None).0);
+                assert!(node_expr(Self::default_idx(&st.shape_vec())) == st.expr_node(None).0);
                 // assert node_expr(self.default_idx(st.shape)) == st.expr_node(None)[0]
                 // assert node_expr(self.default_idx(st.shape)) == st.expr_node('idx')[0]
-                Self::check_bounds(node_expr(Self::default_idx(&st.shape())), offset, numel);
+                Self::check_bounds(node_expr(Self::default_idx(&st.shape_vec())), offset, numel);
                 for (i1, i2) in [
                     (0, numel - 1),
                     (7, 203),
@@ -173,29 +173,29 @@ mod test_index_expr_2d {
                     assert!(node_expr(idx.clone()) == st.expr_node(Some(idx.clone())).0);
                     Self::check_bounds(node_expr(idx), offset, numel);
                 }
-                assert!(node_expr(Self::default_idx(&st.shape())) == st.expr_node(None).0);
-                Self::check_bounds(idxs_expr(Self::default_idxs(&st.shape())), offset, numel);
+                assert!(node_expr(Self::default_idx(&st.shape_vec())) == st.expr_node(None).0);
+                Self::check_bounds(idxs_expr(Self::default_idxs(&st.shape_vec())), offset, numel);
                 let idx0s = [
                     (0, 0),
-                    (0, (st.shape()[0] - 1).min(1)),
-                    (0, st.shape()[0] - 1),
-                    ((st.shape()[0] - 1).min(3), (st.shape()[0] - 1).min(6)),
-                    (st.shape()[0] - 1, st.shape()[0] - 1),
+                    (0, (st.shape_vec()[0] - 1).min(1)),
+                    (0, st.shape_vec()[0] - 1),
+                    ((st.shape_vec()[0] - 1).min(3), (st.shape_vec()[0] - 1).min(6)),
+                    (st.shape_vec()[0] - 1, st.shape_vec()[0] - 1),
                 ];
                 let idx1s = [
                     (0, 0),
-                    (0, (st.shape()[1] - 1).min(1)),
-                    (0, st.shape()[1] - 1),
-                    ((st.shape()[1] - 1).min(3), (st.shape()[1] - 1).min(6)),
-                    (st.shape()[1] - 1, st.shape()[1] - 1),
+                    (0, (st.shape_vec()[1] - 1).min(1)),
+                    (0, st.shape_vec()[1] - 1),
+                    ((st.shape_vec()[1] - 1).min(3), (st.shape_vec()[1] - 1).min(6)),
+                    (st.shape_vec()[1] - 1, st.shape_vec()[1] - 1),
                 ];
-                let idx2s: Vec<Option<(isize, isize)>> = if st.shape().len() == 3 {
+                let idx2s: Vec<Option<(isize, isize)>> = if st.shape_vec().len() == 3 {
                     [
                         (0, 0),
-                        (0, (st.shape()[2] - 1).min(1)),
-                        (0, st.shape()[2] - 1),
-                        ((st.shape()[2] - 1).min(3), (st.shape()[2] - 1).min(6)),
-                        (st.shape()[2] - 1, st.shape()[2] - 1),
+                        (0, (st.shape_vec()[2] - 1).min(1)),
+                        (0, st.shape_vec()[2] - 1),
+                        ((st.shape_vec()[2] - 1).min(3), (st.shape_vec()[2] - 1).min(6)),
+                        (st.shape_vec()[2] - 1, st.shape_vec()[2] - 1),
                     ]
                     .iter()
                     .map(|x| Some(*x))
