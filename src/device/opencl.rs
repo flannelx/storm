@@ -118,12 +118,16 @@ impl Program for CLProgram {
                 0,
                 std::ptr::null(),
             )
-            .expect("enqueue failed");
+            .expect(&format!("enqueue failed {:?} {:?} {:?}", bufs, global_size, local_size));
         }
     }
 }
 
 impl Device for CLDevice {
+    fn name(&self) -> String {
+        "OPENCL".into()
+    }
+
     fn _alloc(&self, size: usize, dtype: Dtype) -> anyhow::Result<Arc<dyn Buffer>> {
         unsafe {
             let ptr = opencl3::memory::create_buffer(

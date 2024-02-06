@@ -672,33 +672,36 @@ impl Kernel {
             }
         }
 
-        if self.opts.has_local && self.opts.has_share {
-            if self.float4_axis(0).len() == 0
-                && self.first_reduce() <= 2
-                && self.first_reduce() + 1 <= self.shape_len()
-                && prod(&self.sts[0].shape()[..self.first_reduce()]) <= 2048
-            {
-                for sz in if prod(&self.sts[0].shape()[..self.first_reduce()]) <= 32 {
-                    vec![256, 16]
-                } else {
-                    vec![16]
-                } {
-                    if all(
-                        &v![st.shape()[self.first_reduce()] % sz == 0 || st.shape()[self.first_reduce()] == 1, for st in self.sts.iter()],
-                    ) {
-                        self.apply_opt(Opt {
-                            op: GROUPTOP,
-                            axis: Some(0),
-                            amt: Some(sz),
-                        });
-                        break;
+        //TODO: OPENCL -54(CL_DEVICE_NOT_FOUND) error when using barrier
+        if DEVICE.name() != "OPENCL" {
+            if self.opts.has_local && self.opts.has_share {
+                if self.float4_axis(0).len() == 0
+                    && self.first_reduce() <= 2
+                    && self.first_reduce() + 1 <= self.shape_len()
+                    && prod(&self.sts[0].shape()[..self.first_reduce()]) <= 2048
+                {
+                    for sz in if prod(&self.sts[0].shape()[..self.first_reduce()]) <= 32 {
+                        vec![256, 16]
+                    } else {
+                        vec![16]
+                    } {
+                        if all(
+                            &v![st.shape()[self.first_reduce()] % sz == 0 || st.shape()[self.first_reduce()] == 1, for st in self.sts.iter()],
+                        ) {
+                            self.apply_opt(Opt {
+                                op: GROUPTOP,
+                                axis: Some(0),
+                                amt: Some(sz),
+                            });
+                            break;
+                        }
                     }
                 }
             }
-        }
 
-        if self.group_for_reduce.len() > 0 {
-            return;
+            if self.group_for_reduce.len() > 0 {
+                return;
+            }
         }
 
         let mut to_upcast: Vec<isize> = vec![];
@@ -777,8 +780,9 @@ impl Kernel {
                     ),
                     amt: Some(0),
                 });
-                let s2 = self.full_unupcasted_shape()[-1];
-                if self.first_reduce() < (self.shape_len() - self.upcasted) && s2 <= 3isize {
+                if self.first_reduce() < (self.shape_len() - self.upcasted)
+                    && self.full_unupcasted_shape()[-1] <= 3isize
+                {
                     self.apply_opt(Opt {
                         op: UNROLL,
                         axis: Some(

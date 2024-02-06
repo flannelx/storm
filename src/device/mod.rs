@@ -7,7 +7,7 @@ use std::{
 use crate::{
     codegen::linearizer::{Linearizer, LinearizerOptions},
     dtype::Dtype,
-    ops::{LazyOp, getenv},
+    ops::{getenv, LazyOp},
     renderer::cstyle::{uops_to_cstyle, LanguageOpts, Renderer},
     shape::symbolic::NodeOp,
 };
@@ -22,14 +22,20 @@ lazy_static::lazy_static! {
 
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = {
-        let mut d = vec![];
-        for func in DEVICES.iter() {
-            if let Ok(device) = func() {
-                d.push(device);
-                break;
+        match getenv::<String>("DEVICE", "".into()).to_uppercase().as_str() {
+            "CUDA" => cuda::CudaDevice::new().unwrap(),
+            "OPENCL" => opencl::CLDevice::new().unwrap(),
+            _ =>  {
+                let mut d = vec![];
+                for func in DEVICES.iter() {
+                    if let Ok(device) = func() {
+                        d.push(device);
+                        break;
+                    }
+                }
+                d[0].to_owned()
             }
         }
-        d[0].to_owned()
     };
 }
 
@@ -48,6 +54,7 @@ pub mod prelude {
 }
 
 pub trait Device: Send + Sync + core::fmt::Debug {
+    fn name(&self) -> String;
     fn _alloc(&self, size: usize, dtype: Dtype) -> anyhow::Result<Arc<dyn Buffer>>;
     fn alloc(&self, size: usize, dtype: Dtype) -> Arc<dyn Buffer> {
         ALLOCTOR.0.alloc(size, dtype)

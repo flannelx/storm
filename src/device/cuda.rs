@@ -139,13 +139,6 @@ impl CudaDevice {
 }
 
 impl Device for CudaDevice {
-    fn linearizer_opts(&self) -> crate::codegen::linearizer::LinearizerOptions {
-        let mut ret = LinearizerOptions::default();
-        ret.global_max = Some(vec![65535, 65535, 2147483647]);
-        ret.local_max = Some(vec![64, 1024, 1024]);
-        ret
-    }
-
     fn _alloc(&self, size: usize, dtype: Dtype) -> anyhow::Result<Arc<dyn Buffer>> {
         unsafe {
             Ok(Arc::new(CudaBuffer {
@@ -225,6 +218,13 @@ impl Device for CudaDevice {
         self.device.synchronize().expect("Device fail to sync");
     }
 
+    fn linearizer_opts(&self) -> crate::codegen::linearizer::LinearizerOptions {
+        let mut ret = LinearizerOptions::default();
+        ret.global_max = Some(vec![65535, 65535, 2147483647]);
+        ret.local_max = Some(vec![64, 1024, 1024]);
+        ret
+    }
+
     fn renderer(&self) -> Arc<dyn Renderer> {
         Arc::new(CudaRenderer::default())
     }
@@ -233,6 +233,10 @@ impl Device for CudaDevice {
         unsafe {
             cuMemFree_v2(ptr as _);
         }
+    }
+
+    fn name(&self) -> String {
+        "CUDA".into()
     }
 }
 

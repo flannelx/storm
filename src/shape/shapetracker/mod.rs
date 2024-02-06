@@ -96,11 +96,11 @@ impl ShapeTracker {
             .product()
     }
 
-    pub fn real_offset(&self) -> isize {
-        let (real_offset, _) = self.expr_node(Some(var("zero", 0, 0)));
-        assert!(real_offset.is_num());
-        real_offset.num_val().unwrap()
-    }
+    // pub fn real_offset(&self) -> isize {
+    //     let (real_offset, _) = self.expr_node(Some(var("zero", 0, 0)));
+    //     assert!(real_offset.is_num());
+    //     real_offset.num_val().unwrap()
+    // }
 
     pub fn real_strides(&self, ignore_valid: bool) -> Vec<Option<isize>> {
         let last_view = self.views.last().unwrap();
@@ -185,65 +185,66 @@ impl ShapeTracker {
             idxs_to_idx(&self.views[self.views.len() - 1].shape, &idxs),
             None,
         );
+        //println!("{:?} {:?}", idx.render_default(), valid.render_default());
         self._expr_idx(idx, valid)
 
-        // let idxs = if let Some(i) = idxs {
-        //     i
-        // } else {
-        //     self.shape_vec()
-        //         .iter()
-        //         .enumerate()
-        //         .map(|(i, sh)| var(&format!("idx{}", i), 0, sh - 1))
-        //         .collect()
-        // };
-        // let (mut idx, mut valid) = _expr_view(&self.views[self.views.len() - 1], &idxs, None);
-        // // let idx = self.views[self.views.len() - 1].expr_idxs(&idxs);
-        // // let valid = self.views[self.views.len() - 1].expr_node_mask(
-        // //     idxs_to_idx(&self.views[self.views.len() - 1].shape, &idxs),
-        // //     None,
-        // // );
-        // //self._expr_idx(idx, valid)
-        // if self.views.len() > 1 {
-        //     for view in self.views[..self.views.len() - 2].iter().rev() {
-        //         if valid.max().unwrap() > 0 {
-        //             return (num(-1), valid);
-        //         }
-        //         let view = view.minify();
-        //         let mut acc = 1;
-        //         let mut idxs = vec![];
-        //         for d in view.shape.iter().rev() {
-        //             idxs.push((idx.clone() / num(acc)) % num(*d));
-        //             acc *= d;
-        //         }
-        //         idxs.reverse();
-        //         (idx, valid) = _expr_view(&view, &idxs, Some(valid));
-        //     }
-        // }
-        // (idx, valid)
-    }
+    //     let idxs = if let Some(i) = idxs {
+    //         i
+    //     } else {
+    //         self.shape_vec()
+    //             .iter()
+    //             .enumerate()
+    //             .map(|(i, sh)| var(&format!("idx{i}"), 0, sh - 1))
+    //             .collect()
+    //     };
+    //     let (mut idx, mut valid) = _expr_view(&self.views[self.views.len() - 1], &idxs, None);
+    //     println!(
+    //         "{:?} {:?} {:?}",
+    //         self.views[self.views.len() - 1],
+    //         idx.render_default(),
+    //         valid.render_default()
+    //     );
+    //     if self.views.len() > 2 {
+    //         for view in self.views[..self.views.len() - 2].iter().rev() {
+    //             if valid.max().unwrap() > 0 {
+    //                 return (num(-1), valid);
+    //             }
+    //             let view = view.minify();
+    //             let mut acc = 1;
+    //             let mut idxs = vec![];
+    //             for d in view.shape.iter().rev() {
+    //                 idxs.push((idx.clone() / num(acc)) % num(*d));
+    //                 acc *= d;
+    //             }
+    //             idxs.reverse();
+    //             (idx, valid) = _expr_view(&view, &idxs, Some(valid));
+    //         }
+    //     }
+    //     (idx, valid)
+    // }
 
-    pub fn expr_node(&self, idx: Option<ArcNode>) -> (ArcNode, ArcNode) {
-        let idx = if let Some(i) = idx {
-            i
-        } else {
-            var(
-                "idx",
-                0,
-                self.views.last().unwrap().shape.iter().product::<isize>() - 1,
-            )
-        };
-        self._expr_idx(
-            self.views[self.views.len() - 1].expr_node(Some(idx.clone())),
-            self.views[self.views.len() - 1].expr_node_mask(idx, None),
-        )
-    }
+    // pub fn expr_node(&self, idx: Option<ArcNode>) -> (ArcNode, ArcNode) {
+    //     let idx = if let Some(i) = idx {
+    //         i
+    //     } else {
+    //         var(
+    //             "idx",
+    //             0,
+    //             self.views.last().unwrap().shape.iter().product::<isize>() - 1,
+    //         )
+    //     };
+    //     self._expr_idx(
+    //         self.views[self.views.len() - 1].expr_node(Some(idx.clone())),
+    //         self.views[self.views.len() - 1].expr_node_mask(idx, None),
+    //     )
+    // }
 
-    pub fn expr_node_str(&self, _idx: &str) -> (ArcNode, ArcNode) {
-        let idx = var("idx", 0, self.shape_vec().iter().product());
-        self._expr_idx(
-            self.views[self.views.len() - 1].expr_node(Some(idx.clone())),
-            self.views[self.views.len() - 1].expr_node_mask(idx, None),
-        )
+    // pub fn expr_node_str(&self, _idx: &str) -> (ArcNode, ArcNode) {
+    //     let idx = var("idx", 0, self.shape_vec().iter().product());
+    //     self._expr_idx(
+    //         self.views[self.views.len() - 1].expr_node(Some(idx.clone())),
+    //         self.views[self.views.len() - 1].expr_node_mask(idx, None),
+    //     )
     }
 
     pub fn axis_is_masked(&self, axis: isize) -> bool {
@@ -320,9 +321,9 @@ fn _expr_view(view: &View, idxs: &[ArcNode], valid: Option<ArcNode>) -> (ArcNode
         view.strides.clone(),
         if view.mask.is_some() {
             view.mask
-                .clone()
+                .as_ref()
                 .unwrap()
-                .into_iter()
+                .iter()
                 .map(|s| Some(s))
                 .collect()
         } else {

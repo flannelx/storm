@@ -519,12 +519,12 @@ impl Node for SumNode {
     }
 
     fn render(&self, ops: Arc<dyn NodeOp>, ctx: Option<&str>, strip_paren: bool) -> String {
-        assert!(
-            self.min().unwrap() != self.max().unwrap(),
-            "min:{} eq max:{}",
-            self.min().unwrap(),
-            self.max().unwrap()
-        );
+        // assert!(
+        //     self.min().unwrap() != self.max().unwrap(),
+        //     "min:{} eq max:{}",
+        //     self.min().unwrap(),
+        //     self.max().unwrap()
+        // );
         let mut ret = ops.sum(self.to_arc(), ctx);
         if strip_paren && ret.chars().nth(0).unwrap() == '(' {
             ret = ret.replace("(", "").replace(")", "");

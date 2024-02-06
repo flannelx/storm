@@ -217,7 +217,7 @@ impl View {
             );
             return Some(view!(new_shape));
         }
-        //assert!(self.shape.iter().product::<isize>() == new_shape.iter().product::<isize>());
+        assert!(self.shape.iter().product::<isize>() == new_shape.iter().product::<isize>());
         if new_shape.len() == 0
             && self.mask.is_some()
             && v![0, for x in self.mask.as_ref().unwrap(), if x.0==x.1].len() > 0
