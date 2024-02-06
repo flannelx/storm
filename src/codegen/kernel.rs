@@ -775,7 +775,7 @@ impl Kernel {
             && (self.upcasted == 0 || prod(&self.full_shape()[-self.upcasted..]) < 64)
         {
             let s1 = self.full_unupcasted_shape()[-1];
-            if s1 < 32isize {
+            if s1 <= 32isize {
                 self.apply_opt(Opt {
                     op: UNROLL,
                     axis: Some(
@@ -784,6 +784,7 @@ impl Kernel {
                     amt: Some(0),
                 });
                 if self.first_reduce() < (self.shape_len() - self.upcasted)
+                    && s1 <= 3isize
                     && self.full_unupcasted_shape()[-1] <= 3isize
                 {
                     self.apply_opt(Opt {
@@ -824,9 +825,9 @@ impl Kernel {
             }
         }
 
+        //         && self.local_dims == 0
         // if self.opts.has_local {
         //     if getenv("NOLOCALS", 0) == 1
-        //         && self.local_dims == 0
         //         && self.group_for_reduce.is_empty()
         //     {
         //         self.apply_opt(Opt {
@@ -852,6 +853,7 @@ impl Kernel {
         //         for (mut axis, local_sz) in to_local[..to_local.len().min(3)].iter().sorted() {
         //             axis -= deleted_shape;
         //             let will_deleted_shape = *local_sz == self.full_shape()[axis];
+        //             println!("{} {}", axis, local_sz);
         //             self.apply_opt(Opt {
         //                 op: LOCAL,
         //                 axis: Some(axis),

@@ -305,6 +305,14 @@ impl ShapeTracker {
     pub fn unit_stride_axes(&self, ignore_valid: bool) -> Vec<isize> {
         crate::v![i as isize, for (i, st) in self.real_strides(ignore_valid).iter().enumerate(), if st.is_some_and(|s| s == 1)]
     }
+
+    pub fn real_size(&self) -> usize {
+        if self.shape().dims.contains(&0) {
+            return 0;
+        }
+        let mut ret = self.expr_idxs(None).0.max().unwrap();
+        (ret + 1) as usize
+    }
 }
 
 fn _expr_view(view: &View, idxs: &[ArcNode], valid: Option<ArcNode>) -> (ArcNode, ArcNode) {

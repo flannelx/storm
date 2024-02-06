@@ -1145,7 +1145,7 @@ impl FlopCounter {
             shape: arg.st().shape_vec(),
             dtype: arg.dtype(),
             flops: 0.,
-            mem: HashMap::from([(arg.idx(), arg.dtype().size * arg.st().size() as usize)]),
+            mem: HashMap::from([(arg.idx(), arg.dtype().size * arg.st().real_size())]),
         }
     }
     fn buffer_const(arg: &Buffers) -> Self {
@@ -1157,11 +1157,13 @@ impl FlopCounter {
         }
     }
     fn buffer_store(self, arg: &Buffers) -> Self {
+        let mut mem = self.mem.clone();
+        mem.insert(arg.idx(), arg.dtype().size * arg.st().real_size());
         Self {
             shape: arg.st().shape_vec(),
             dtype: arg.dtype(),
             flops: self.flops,
-            mem: self.mem,
+            mem,
         }
     }
     fn unary_cast(self, arg: Dtype) -> Self {
