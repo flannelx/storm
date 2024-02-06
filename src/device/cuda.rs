@@ -1,5 +1,4 @@
-#![cfg(target_arch = "x86_64")]
-
+#![cfg(not(target_os = "macos"))]
 use cudarc::driver::result::malloc_sync;
 use cudarc::driver::sys::{
     cuCtxCreate_v2, cuCtxSetCurrent, cuDeviceComputeCapability, cuGetErrorString,

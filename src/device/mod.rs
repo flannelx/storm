@@ -14,7 +14,7 @@ use crate::{
 
 lazy_static::lazy_static! {
     pub static ref DEVICES: Vec<fn() -> anyhow::Result<Arc<dyn Device>>> = vec![
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(not(target_os = "macos"))]
         cuda::CudaDevice::new,
         opencl::CLDevice::new,
     ];
@@ -23,6 +23,7 @@ lazy_static::lazy_static! {
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = {
         match getenv::<String>("DEVICE", "".into()).to_uppercase().as_str() {
+            #[cfg(not(target_os = "macos"))]
             "CUDA" => cuda::CudaDevice::new().unwrap(),
             "OPENCL" => opencl::CLDevice::new().unwrap(),
             _ =>  {
