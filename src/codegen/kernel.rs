@@ -3,6 +3,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
+use itertools::Itertools;
+
 use crate::arg::Arg;
 use crate::codegen::linearizer::cartesian_product;
 use crate::dtype::{_bool, float16, float32, int32, NumType};
@@ -633,11 +635,9 @@ impl Kernel {
                 .iter()
                 .position(|a| a.eq(&mulop_src[1].lo().args[0].to_buf()))
                 .unwrap()];
-            let strides0: Vec<Option<isize>> = st0
-                .real_strides(false);
-            let strides1: Vec<Option<isize>> = st1
-                .real_strides(false);
-            if strides0[self.first_reduce() as usize].is_some_and(|n| n  == 1)
+            let strides0: Vec<Option<isize>> = st0.real_strides(false);
+            let strides1: Vec<Option<isize>> = st1.real_strides(false);
+            if strides0[self.first_reduce() as usize].is_some_and(|n| n == 1)
                 && !(has_expanded_axis(&st0.shape().dims, &strides0))
                 && has_expanded_axis(&st1.shape().dims, &strides1)
             {
@@ -763,10 +763,104 @@ impl Kernel {
         //(len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and
         //(self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
 
-        // if self.first_reduce() < (self.shape_len() - self.upcasted)
-        //     && (self.shape_offsets(self.full_buf_idx as isize).len() <= 4
-        //         || !any(&v![r[2] > 0, for r in self.upcasted_axis(self.full_buf_idx as isize)])) &&
-        //         (self.upcasted == 0 || prod(&self.full_shape()[-self.upcasted..]) < 64)
-        // {}
+        if self.first_reduce() < (self.shape_len() - self.upcasted)
+            && (self.shape_offsets(self.full_buf_idx as isize).len() <= 4
+                || !any(&v![r.2 > 0, for r in self.upcasted_axis(self.full_buf_idx as isize)]))
+            && (self.upcasted == 0 || prod(&self.full_shape()[-self.upcasted..]) < 64)
+        {
+            let s1 = self.full_unupcasted_shape()[-1];
+            if s1 < 32isize {
+                self.apply_opt(Opt {
+                    op: UNROLL,
+                    axis: Some(
+                        self.full_unupcasted_shape().len() as isize - 1 - self.first_reduce(),
+                    ),
+                    amt: Some(0),
+                });
+                let s2 = self.full_unupcasted_shape()[-1];
+                if self.first_reduce() < (self.shape_len() - self.upcasted) && s2 <= 3isize {
+                    self.apply_opt(Opt {
+                        op: UNROLL,
+                        axis: Some(
+                            self.full_unupcasted_shape().len() as isize - 1 - self.first_reduce(),
+                        ),
+                        amt: Some(0),
+                    });
+                }
+            } else {
+                for splits in [4] {
+                    if self.full_unupcasted_shape()[-1] % splits == 0isize {
+                        self.apply_opt(Opt {
+                            op: UNROLL,
+                            axis: Some(
+                                self.full_unupcasted_shape().len() as isize
+                                    - 1
+                                    - self.first_reduce(),
+                            ),
+                            amt: Some(splits),
+                        });
+                    }
+                }
+            }
+        }
+
+        for splits in [4] {
+            if self.upcasted == 0
+                && self.full_unupcasted_shape().len() > 0
+                && self.full_unupcasted_shape()[-1] % splits == 0isize
+            {
+                self.apply_opt(Opt {
+                    op: UPCAST,
+                    axis: Some(self.full_unupcasted_shape().len() as isize - 1),
+                    amt: Some(splits),
+                });
+            }
+        }
+
+        // if self.opts.has_local {
+        //     if getenv("NOLOCALS", 0) == 1
+        //         && self.local_dims == 0
+        //         && self.group_for_reduce.is_empty()
+        //     {
+        //         self.apply_opt(Opt {
+        //             op: NOLOCALS,
+        //             axis: None,
+        //             amt: None,
+        //         })
+        //     } else {
+        //         //local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]  # noqa: E501
+        //         let local_axis_ranking = v![(if any(&v![self.sts[buf_index].views.last().as_ref().unwrap().strides[axis] == 0, for buf_index in 0..self.sts.len()]) { 1isize } else { 0isize }, axis as isize), for axis in 0..self.full_shape()[..self.first_reduce()].len()];
+        //         let mut sorted_local_axis_ranking = local_axis_ranking.clone();
+        //         sorted_local_axis_ranking.sort_by_cached_key(|x| (-x.0, -x.1));
+        //         let mut to_local: Vec<(isize, isize)> = vec![];
+        //         for (_, axis) in sorted_local_axis_ranking {
+        //             let local_size = prod(&v![*sz, for (_, sz) in to_local.iter()]);
+        //             //local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501
+        //             let local_sz = v![x, for x in vec![vec![32;if axis == 0isize { 1 } else { 0 }], vec![16, 8, 4, 3, 2]].concat(), if self.full_shape()[axis] % x == 0 && local_size * x <= 128];
+        //             if local_sz.len() > 0 {
+        //                 to_local.push((axis, local_sz[0]));
+        //             }
+        //         }
+        //         let mut deleted_shape = 0;
+        //         for (mut axis, local_sz) in to_local[..to_local.len().min(3)].iter().sorted() {
+        //             axis -= deleted_shape;
+        //             let will_deleted_shape = *local_sz == self.full_shape()[axis];
+        //             self.apply_opt(Opt {
+        //                 op: LOCAL,
+        //                 axis: Some(axis),
+        //                 amt: Some(*local_sz),
+        //             });
+        //             if will_deleted_shape {
+        //                 deleted_shape += 1;
+        //             }
+        //         }
+        //     }
+        // }
+    }
+
+    pub fn full_unupcasted_shape(&self) -> Shape {
+        self.full_shape()[..self.shape_len() - self.upcasted]
+            .to_vec()
+            .into()
     }
 }

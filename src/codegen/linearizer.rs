@@ -130,7 +130,7 @@ pub struct Linearizer {
 pub fn _limit_size(mut x: Vec<isize>, max_size: Vec<isize>) -> Vec<isize> {
     let mut new_shape = x;
     for i in 0..new_shape.len() {
-        let mut next_idx = (i+1) % new_shape.len();
+        let mut next_idx = (i + 1) % new_shape.len();
         while new_shape[i] > max_size[i] {
             new_shape[i] /= 2;
             if new_shape[next_idx] > max_size[next_idx] {
@@ -167,7 +167,11 @@ impl Linearizer {
             let g_dim = self.kernel.global_dims();
             if global_max.len() > 0 {
                 let tmp = vec![
-                    if g_dim > global_max.len() as isize { vec![] } else { global_max[..self.kernel.global_dims() as usize].to_vec() },
+                    if g_dim > global_max.len() as isize {
+                        vec![]
+                    } else {
+                        global_max[..self.kernel.global_dims() as usize].to_vec()
+                    },
                     if local_max.len() > 0 {
                         local_max[..self.kernel.local_dims as usize].to_vec()
                     } else {
@@ -183,14 +187,16 @@ impl Linearizer {
                     //self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
                     let tl = tmp.len();
                     self.kernel.reshape_and_permute(
-                        Some(Box::new(move |x: Vec<isize>| _limit_size(x, vec![isize::MAX; fl - tl]))),
+                        Some(Box::new(move |x: Vec<isize>| {
+                            _limit_size(x, vec![isize::MAX; fl - tl])
+                        })),
                         None,
                     );
                 }
-                for i in 0..(self.kernel.global_dims()-1) as usize {
+                for i in 0..(self.kernel.global_dims() - 1) as usize {
                     if i < global_max.len() && self.kernel.full_shape()[i] > global_max[i] {
                         let mut order = (0..fl as isize).collect::<Vec<isize>>();
-                        order.swap(i, (self.kernel.global_dims()-1) as usize);
+                        order.swap(i, (self.kernel.global_dims() - 1) as usize);
                         self.kernel.reshape_and_permute(None, Some(order));
                     }
                 }
@@ -518,13 +524,13 @@ impl Linearizer {
             val,
         );
 
-        let mut acc_scope: HashMap<UOp, Vec<UOp>> = HashMap::new();
+        let mut acc_scope: HashMap<&UOp, Vec<&UOp>> = HashMap::new();
         for u in self.uops.iter() {
             if u.uop == UOps::PHI {
                 acc_scope
-                    .entry(u.vin[0].clone())
+                    .entry(&u.vin[0])
                     .or_default()
-                    .extend(u.vin[2..].iter().map(|n| n.clone()).collect::<Vec<UOp>>())
+                    .extend(u.vin[2..].iter().collect::<Vec<&UOp>>())
             }
         }
 
@@ -537,17 +543,21 @@ impl Linearizer {
             } else if !matches!(u.uop, UOps::CONST | UOps::ALU | UOps::CAST | UOps::LOAD) {
                 loop_stack.last_mut().unwrap().push(u.clone())
             } else {
-                let parents = get_recursive_parents(u.clone(), &mut acc_scope, true);
+                let parents = HashSet::<&UOp>::from_iter(get_recursive_parents(u, &mut acc_scope, true));
                 if any(&v![u.uop == UOps::DEFINE_LOCAL, for u in parents.iter()]) {
                     loop_stack.last_mut().unwrap().push(u.clone());
                 } else {
-                    for i in (0..loop_stack.len()).rev() {
-                        if v![0, for x in loop_stack[i].iter(), if parents.contains(x)].len() > 0
-                            || i == 0
-                        {
+                    'out: for i in (0..loop_stack.len()).rev() {
+                        if i == 0 {
                             loop_stack[i].push(u.clone());
                             break;
                         }
+                        for x in loop_stack[i].iter() {
+                            if parents.contains(x) {
+                                loop_stack[i].push(u.clone());
+                                break 'out;
+                            }
+                        };
                     }
                 }
             }
@@ -590,20 +600,13 @@ impl Linearizer {
         for i in 0..self.uops.len() {
             let u = &self.uops[i];
             if u.uop == UOps::LOOP {
-                //self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(u)), key=self.uops.index)[-1])+1)  # noqa: E501
-                let inb = self
-                    .uops
+                let uops_idxs:HashMap<&UOp, usize> = HashMap::from_iter(v![(u, i), for (i, u) in self.uops.iter().enumerate()]);
+                let inb = uops_idxs[self
+                    .get_recursive_children(&u)
                     .iter()
-                    .position(|uu| {
-                        uu == self
-                            .get_recursive_children(u.clone())
-                            .iter()
-                            .sorted_by_cached_key(|x| self.uops.iter().position(|p| &p == x).unwrap())
-                            .last()
-                            .unwrap()
-                    })
-                    .unwrap()
-                    + 1;
+                    .sorted_by_cached_key(|x| uops_idxs[**x])
+                    .last()
+                    .unwrap()] + 1;
                 self.uop(
                     UOps::END,
                     None,
@@ -1190,20 +1193,13 @@ impl Linearizer {
         ret
     }
 
-    fn get_recursive_children(&self, x: UOp) -> HashSet<UOp> {
-        let mut deps = HashSet::from([x.clone()]);
-        let mut ssize = 0;
-        while ssize != deps.len() {
-            ssize = deps.len();
-            for u in self.uops.iter() {
-                if deps
-                    .intersection(&HashSet::from_iter(
-                        v![x, for x in u.vin.iter(), if x.uop != UOps::PHI],
-                    ))
-                    .count()
-                    > 0
-                {
-                    deps.insert(u.clone());
+    fn get_recursive_children<'a>(&'a self, x: &'a UOp) -> HashSet<&UOp> {
+        let mut deps = HashSet::from([x]);
+        for u in self.uops.iter() {
+            for x in u.vin.iter() {
+                if deps.contains(x) {
+                    deps.insert(u);
+                    break;
                 }
             }
         }
@@ -1342,26 +1338,21 @@ impl Linearizer {
     }
 }
 
-fn get_recursive_parents(
-    x: UOp,
-    acc_scope: &mut HashMap<UOp, Vec<UOp>>,
+fn get_recursive_parents<'a>(
+    x: &'a UOp,
+    acc_scope: &mut HashMap<&'a UOp, Vec<&'a UOp>>,
     with_phi: bool,
-) -> HashSet<UOp> {
-    let mut ret = HashSet::from_iter(x.vin.clone());
-    for p in x.vin.iter() {
-        ret = ret
-            .union(&get_recursive_parents(p.clone(), acc_scope, with_phi))
-            .into_iter()
-            .map(|s| s.clone())
-            .collect::<HashSet<UOp>>();
-    }
-    if with_phi && acc_scope.get(&x).is_some() {
-        ret = ret
-            .union(&HashSet::from_iter(acc_scope.entry(x).or_default().clone()))
-            .map(|s| s.clone())
-            .collect::<HashSet<UOp>>();
-    }
-    ret
+) -> Vec<&'a UOp> {
+    vec![
+        x.vin.iter().collect::<Vec<&UOp>>(),
+        v![get_recursive_parents(p, acc_scope, with_phi),for p in x.vin.iter()].concat(),
+        if with_phi && acc_scope.get(x).is_some() {
+            acc_scope[x].clone()
+        } else {
+            vec![]
+        },
+    ]
+    .concat()
 }
 
 pub fn cartesian_product<T: Clone>(lists: Vec<Vec<T>>) -> Vec<Vec<T>> {
