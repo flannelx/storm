@@ -145,7 +145,7 @@ BuffersFrom!(ConstBuffer);
 BuffersFrom!(LazyBuffer);
 BuffersFrom!(LocalBuffer);
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum OptOps {
     UPCAST,
     UPCASTMID,
@@ -158,6 +158,7 @@ pub enum OptOps {
     PADTO,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Opt {
     op: OptOps,
     axis: Option<isize>,
@@ -192,6 +193,7 @@ pub struct Kernel {
     pub group_for_reduce: Vec<isize>,
     pub dont_use_locals: bool,
     pub local_alias: HashMap<usize, LocalBuffer>,
+    pub applied_opts: Vec<Opt>,
 }
 
 impl Kernel {
@@ -237,7 +239,7 @@ impl Kernel {
             group_for_reduce: vec![],
             dont_use_locals: false,
             local_alias: HashMap::new(),
-            //applied_opts: vec![],
+            applied_opts: vec![],
         };
         ret.reshape_and_permute(None, Some(permute));
         // # parameters for optimization
@@ -383,6 +385,7 @@ impl Kernel {
                 || !matches!(opt.op, LOCAL | LASTLOCAL | GROUP | GROUPTOP | UPCASTMID),
             "not using locals"
         );
+        self.applied_opts.push(opt.clone());
         let mut axis = -1;
         if let Some(opt_axis) = opt.axis {
             //axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
