@@ -21,8 +21,6 @@ pub struct LanguageOpts {
     pub smem_align: String,
     pub arg_int_prefix: String,
     pub barrier: String,
-    pub gid: Vec<String>,
-    pub lid: Vec<String>,
     pub global_max: Vec<isize>,
     pub local_max: Vec<isize>,
     pub extra_args: Vec<String>,
@@ -32,6 +30,7 @@ pub struct LanguageOpts {
     pub external_local_bufs: bool,
     pub uses_ptr_arithmetic: bool,
     pub launch_bounds: bool,
+    pub code_for_workitem: HashMap<&'static str,Vec<String>>,
 }
 
 impl Default for LanguageOpts {
@@ -46,8 +45,6 @@ impl Default for LanguageOpts {
             smem_align: Default::default(),
             arg_int_prefix: "const int".into(),
             barrier: Default::default(),
-            gid: Default::default(),
-            lid: Default::default(),
             global_max: Default::default(),
             local_max: Default::default(),
             extra_args: Default::default(),
@@ -57,6 +54,7 @@ impl Default for LanguageOpts {
             external_local_bufs: Default::default(),
             uses_ptr_arithmetic: Default::default(),
             launch_bounds: Default::default(),
+            code_for_workitem: Default::default(),
         }
     }
 }
@@ -179,7 +177,7 @@ pub trait Renderer: 'static + Send + Sync + Op {
     }
 
     fn render_local(&self, name: &str, size: usize) -> String {
-        self.lang_opts().smem_prefix.clone() + &format!("float {name}[{size}]")
+        self.lang_opts().smem_prefix.clone() + &format!("float {name}[{size}];")
     }
 
     fn render_for(&self, expr: &str, min: &str, max: &str) -> String {
@@ -463,17 +461,12 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                         t => panic!("{t:?}"),
                     })
                     .collect::<Vec<String>>();
-                let xid = if args[1].starts_with("g") {
-                    lang.lang_opts().gid.clone()
-                } else {
-                    lang.lang_opts().lid.clone()
-                };
                 kk(
                     &format!(
                         "{} {} = {}; /* {} */",
                         lang.lang_opts().size_prefix,
                         args[1],
-                        xid[args[0].parse::<usize>().unwrap()],
+                        lang.lang_opts().code_for_workitem[(args[1].as_bytes()[0] as char).to_string().as_str()][args[0].parse::<usize>().unwrap()],
                         args[2]
                     ),
                     &mut kernel,
@@ -514,7 +507,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                     &strip_parens(&r[&vin[1]]),
                     matches!(vin[0].uop, UOps::DEFINE_LOCAL),
                 );
-                if vin.len() > 2 {
+                if vin.len() > 3 {
                     val = lang.render_conditional(&r[&vin[2]], &val, &r[&vin[3]])
                 }
                 kk(
@@ -651,7 +644,10 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                 );
                 r.insert(u.clone(), r[&vin[0]].clone());
             }
-            UOps::IF => todo!(),
+            UOps::IF => {
+                kk(&lang.render_if(&r[&vin[0]]), &mut kernel, depth);
+                depth +=1;
+            },
         }
     }
     lang.render_kernel(function_name, &kernel, &bufs, &local_size, &prekernel)

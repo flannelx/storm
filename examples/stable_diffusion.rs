@@ -890,8 +890,8 @@ fn get_pairs(s: &[String]) -> Vec<Vec<String>> {
 
 impl Tokenizer {
     fn new() -> Self {
-        let vocab: Value = serde_json::from_str(&std::fs::read_to_string("../tokenizer_vocab.json").unwrap()).unwrap();
-        let merge = std::fs::read_to_string("../tokenizer_merges.txt").unwrap()
+        let vocab: Value = serde_json::from_str(&std::fs::read_to_string("tokenizer_vocab.json").unwrap()).unwrap();
+        let merge = std::fs::read_to_string("tokenizer_merges.txt").unwrap()
             .split("\n")
             .into_iter()
             .map(|s| s.to_string())

@@ -2,16 +2,19 @@
 
 use cudarc::driver::result::malloc_sync;
 use cudarc::driver::sys::{
-    cuCtxCreate_v2, cuCtxSetCurrent, cuMemAllocManaged, cudaError_enum, CUcontext,
+    cuCtxCreate_v2, cuCtxSetCurrent, cuDeviceComputeCapability, cuGetErrorString,
+    cuMemAllocManaged, cudaError_enum, CUcontext,
 };
 use cudarc::driver::sys::{cuMemFree_v2, cuMemcpyDtoH_v2, cuMemcpyHtoD_v2, CUdevice, CUdeviceptr};
 use cudarc::driver::{CudaFunction, DevicePtrMut};
-use cudarc::nvrtc::{compile_ptx, compile_ptx_with_opts};
+use cudarc::nvrtc::{compile_ptx, compile_ptx_with_opts, CompileOptions};
 
 use super::{Buffer, Device, Program};
+use crate::codegen::linearizer::LinearizerOptions;
 use crate::prelude::*;
 use crate::renderer::cstyle::{LanguageOpts, Renderer};
 use crate::shape::symbolic::CStyle;
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::ptr::null_mut;
 use std::sync::Arc;
@@ -31,20 +34,31 @@ impl Default for CudaRenderer {
                 half_prekernel: Some("#include <cuda_fp16.h>".into()),
                 barrier: "__syncthreads();".into(),
                 float4: Some("make_float4".into()),
-                gid: (0..3)
-                    .map(|i| {
+                code_for_workitem: HashMap::from([
+                    ("g".into(), (0..3).map(|i| {
                         format!(
-                            "blockDim.{}*blockIdx.{}+threadIdx.{}",
+                            "blockIdx.{}",
                             (120u8 + i) as char,
-                            (120u8 + i) as char,
-                            (120u8 + i) as char
                         )
-                    })
-                    .collect(),
-                lid: (0..3)
-                    .map(|i| format!("threadIdx.{}", (128u8 + i) as char))
-                    .collect(),
+                    }).collect()),
+                    ("l".into(), (0..3).map(|i| {
+                        format!(
+                            "threadIdx.{}",
+                            (120u8 + i) as char,
+                        )
+                    }).collect()),
+                    ("i".into(), (0..3).map(|i| {
+                        format!(
+                            "(blockIdx.{}*blockDim.{}+threadIdx.{})",
+                            (120u8 + i) as char,
+                            (120u8 + i) as char,
+                            (120u8 + i) as char,
+                        )
+                    }).collect()),
+                ]),
                 uses_vload: true,
+                global_max: vec![65535, 65535, 2147483647],
+                local_max: vec![64, 1024, 1024],
                 ..Default::default()
             }),
         }
@@ -102,6 +116,7 @@ impl Drop for CudaBuffer {
 #[derive(Debug, Clone)]
 pub struct CudaDevice {
     device: Arc<cudarc::driver::CudaDevice>,
+    arch: &'static str,
 }
 
 unsafe impl Send for CudaDevice {}
@@ -110,11 +125,27 @@ unsafe impl Sync for CudaDevice {}
 impl CudaDevice {
     pub fn new() -> anyhow::Result<Arc<dyn Device>> {
         let device = cudarc::driver::CudaDevice::new(0)?;
-        Ok(Arc::new(Self { device }))
+        let mut major = 0;
+        let mut minor = 0;
+        unsafe {
+            cuDeviceComputeCapability(&mut major, &mut minor, *device.cu_device());
+        }
+        let arch = format!("sm_{major}{minor}");
+        Ok(Arc::new(Self {
+            device,
+            arch: arch.leak(),
+        }))
     }
 }
 
 impl Device for CudaDevice {
+    fn linearizer_opts(&self) -> crate::codegen::linearizer::LinearizerOptions {
+        let mut ret = LinearizerOptions::default();
+        ret.global_max = Some(vec![65535, 65535, 2147483647]);
+        ret.local_max = Some(vec![64, 1024, 1024]);
+        ret
+    }
+
     fn _alloc(&self, size: usize, dtype: Dtype) -> anyhow::Result<Arc<dyn Buffer>> {
         unsafe {
             Ok(Arc::new(CudaBuffer {
@@ -125,7 +156,12 @@ impl Device for CudaDevice {
         }
     }
 
-    fn buf_from_mem_ptr(&self, size: usize, dtype: Dtype, mem: *mut std::ffi::c_void) -> Arc<dyn Buffer> {
+    fn buf_from_mem_ptr(
+        &self,
+        size: usize,
+        dtype: Dtype,
+        mem: *mut std::ffi::c_void,
+    ) -> Arc<dyn Buffer> {
         unsafe {
             Arc::new(CudaBuffer {
                 ptr: mem as _,
@@ -137,7 +173,19 @@ impl Device for CudaDevice {
 
     fn build(&self, name: &str, program: &str) -> Arc<dyn Program> {
         unsafe {
-            let ptx = cudarc::nvrtc::compile_ptx(program).unwrap();
+            let ptx = cudarc::nvrtc::compile_ptx_with_opts(
+                program,
+                CompileOptions {
+                    include_paths: vec![
+                        "-I/usr/local/cuda/include".into(),
+                        "-I/usr/include".into(),
+                        "-I/opt/cuda/include/".into(),
+                    ],
+                    arch: Some(self.arch),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             let mut module: cudarc::driver::sys::CUmodule = std::ptr::null_mut();
             let cstring = CString::new(ptx.to_src()).unwrap();
             let r =
@@ -220,7 +268,8 @@ impl Program for CudaProgram {
                 args.iter().collect::<Vec<&u64>>().as_mut_ptr() as _,
                 null_mut(),
             );
-            assert!(r == cudaError_enum::CUDA_SUCCESS, "{:?}", r);
+            //println!("{:?}\nbuffers: {:?}\nglobal:{:?}\nlocal:{:?}", r, args, global_size, local_size);
+            assert!(r == cudaError_enum::CUDA_SUCCESS, "{:?}\nbuffers: {:?}\nglobal:{:?}\nlocal:{:?}", r, args, global_size, local_size);
         }
     }
 }

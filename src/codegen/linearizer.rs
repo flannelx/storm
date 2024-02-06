@@ -1,8 +1,8 @@
 use itertools::Itertools;
 
 use crate::dtype::{_bool, float16, float32, int32};
-use crate::prelude::*;
 use crate::shape::shapetracker::strides_for_shape;
+use crate::{ops, prelude::*};
 use std::collections::{HashMap, HashSet};
 use std::ops::Index;
 use std::sync::Arc;
@@ -127,6 +127,21 @@ pub struct Linearizer {
     pub load_cache: HashMap<String, UOp>,
 }
 
+pub fn _limit_size(mut x: Vec<isize>, max_size: Vec<isize>) -> Vec<isize> {
+    let mut new_shape = x;
+    for i in 0..new_shape.len() {
+        let mut next_idx = (i+1) % new_shape.len();
+        while new_shape[i] > max_size[i] {
+            new_shape[i] /= 2;
+            if new_shape[next_idx] > max_size[next_idx] {
+                next_idx = (next_idx + 1) % new_shape.len();
+            }
+            new_shape[next_idx] *= 2;
+        }
+    }
+    new_shape
+}
+
 impl Linearizer {
     pub fn new(ast: LazyOp, opts: Option<LinearizerOptions>) -> Self {
         Self {
@@ -142,6 +157,48 @@ impl Linearizer {
         }
     }
 
+    pub fn upcast(&mut self) {
+        self.kernel.upcasted += 1;
+    }
+
+    pub fn limit_dims_to_max(&mut self, global_max: &[isize], local_max: &[isize]) {
+        if self.kernel.global_dims() > 0 {
+            let fl = self.kernel.full_shape().len();
+            let g_dim = self.kernel.global_dims();
+            if global_max.len() > 0 {
+                let tmp = vec![
+                    if g_dim > global_max.len() as isize { vec![] } else { global_max[..self.kernel.global_dims() as usize].to_vec() },
+                    if local_max.len() > 0 {
+                        local_max[..self.kernel.local_dims as usize].to_vec()
+                    } else {
+                        vec![]
+                    },
+                ]
+                .concat();
+                if global_max.iter().max()
+                    < self.kernel.full_shape()[..self.kernel.global_dims()]
+                        .iter()
+                        .max()
+                {
+                    //self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
+                    let tl = tmp.len();
+                    self.kernel.reshape_and_permute(
+                        Some(Box::new(move |x: Vec<isize>| _limit_size(x, vec![isize::MAX; fl - tl]))),
+                        None,
+                    );
+                }
+                for i in 0..(self.kernel.global_dims()-1) as usize {
+                    if i < global_max.len() && self.kernel.full_shape()[i] > global_max[i] {
+                        let mut order = (0..fl as isize).collect::<Vec<isize>>();
+                        order.swap(i, (self.kernel.global_dims()-1) as usize);
+                        self.kernel.reshape_and_permute(None, Some(order));
+                    }
+                }
+            }
+        }
+    }
+
+    #[rustfmt::skip]
     pub fn linearize(&mut self) {
         // # no new opts and we already ran? skip relinearizing if self.applied_opts == self.applied_opts_cache: return self
         let mut sts_backup = self.kernel.sts.clone();
@@ -151,6 +208,15 @@ impl Linearizer {
         self.uops = vec![];
         self.buf_uops = vec![None; self.kernel.bufs.len()];
         self.loop_uops = HashMap::new();
+
+        // limit dims if need
+        if let Some(gm) = &self.kernel.opts.global_max && let Some(lm) = &self.kernel.opts.local_max {
+            let gm = gm.clone();
+            let lm = lm.clone();
+            self.limit_dims_to_max(&gm, &lm);
+        }
+
+
         for i in 0..self.kernel.bufs.len() {
             let buf = &self.kernel.bufs[i];
             if let Buffers::MemBuffer(buffer) = buf {
@@ -180,27 +246,19 @@ impl Linearizer {
         // self.bufs.append(LocalBuffer("temp", self.sts[-1].size()))
         // self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ("temp", self.sts[-1].size())))
         //
-        // self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[
-        // self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)
-        // ]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce)
-        // + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
+        // self.sts.append(ShapeTracker.from_shape(
+        // tuple([1] * self.global_dims +
+        // list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) +
+        // [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) +
+        // [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
         if self.kernel.group_for_reduce.len() > 0 {
             self.kernel.sts.push(ShapeTracker::from_shape(
-                &vec![
-                    &vec![1; self.kernel.global_dims() as usize],
-                    &self.kernel.full_shape()[self.kernel.global_dims() as usize
-                        ..(self.kernel.global_dims() + self.kernel.local_dims) as usize
-                            + self.kernel.group_for_reduce.len()],
                     &vec![
-                        1;
-                        (self.kernel.shape_len()
-                            - self.kernel.upcasted
-                            - self.kernel.group_for_reduce.len() as isize)
-                            as usize
-                    ],
-                    &v![x[0].into(), for x in self.kernel.upcasted_axis(0)],
-                ]
-                .concat(),
+                        &vec![1; self.kernel.global_dims() as usize],
+                        &self.kernel.full_shape()[self.kernel.global_dims()..self.kernel.global_dims() + self.kernel.local_dims + self.kernel.group_for_reduce.len() as isize],
+                        &vec![1;(self.kernel.shape_len() - self.kernel.upcasted - self.kernel.group_for_reduce.len() as isize - self.kernel.first_reduce()) as usize],
+                        &v![x.0, for x in self.kernel.upcasted_axis(0)],
+                    ].concat(),
             ));
             let tmp_buf = LocalBuffer {
                 name: "tmp".into(),
@@ -213,7 +271,7 @@ impl Linearizer {
                 UOps::DEFINE_LOCAL,
                 Some(float32),
                 vec![],
-                vec![Arg::Buffer(tmp_buf.into())],
+                vec![Arg::Str("tmp".into()), Arg::Idx(self.kernel.sts[self.kernel.sts.len()-1].size())],
                 true,
                 None,
                 true,
@@ -239,18 +297,19 @@ impl Linearizer {
         let (global_idx, loop_global_idxs) = get_grouped_dims(
             "gidx",
             0,
-            &self.kernel.full_shape()[..self.kernel.global_dims() as usize],
+            &self.kernel.full_shape()[..self.kernel.global_dims()],
             if self.kernel.opts.has_local { 3 } else { 0 },
         );
+        //local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)], 3 if self.opts.has_local else 0)  # noqa: E501
         let (local_idxs, loop_local_idxs) = get_grouped_dims(
             "lidx",
             self.kernel.global_dims() as usize,
-            &self.kernel.full_shape()[self.kernel.global_dims() as usize
-                ..self.kernel.first_reduce() as usize + self.kernel.group_for_reduce.len()],
+            &self.kernel.full_shape()[self.kernel.global_dims()
+                ..self.kernel.first_reduce() + self.kernel.group_for_reduce.len() as isize],
             if self.kernel.opts.has_local { 3 } else { 0 },
         );
         let full_upcast_idxs = v![none_var(0, s-1), for s in self.kernel.full_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
-        let upcast_idxs = v![none_var(0, s-1), for s in self.kernel.output_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
+        let mut upcast_idxs = v![none_var(0, s-1), for s in self.kernel.output_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
 
         self.global_size = None;
         self.local_size = None;
@@ -328,6 +387,7 @@ impl Linearizer {
         let mut fake_reduce_idxs: Vec<ArcNode> = vec![];
 
         if let Some(reduceop) = &self.kernel.reduceop {
+            let optype = reduceop.optype.clone();
             let reduce_idxs = v![var(&format!("ridx{i}"), 0, self.kernel.full_shape()[i]-1), for i in self.kernel.first_reduce() as usize +self.kernel.group_for_reduce.len()..(self.kernel.shape_len()-self.kernel.upcasted) as usize];
             fake_reduce_idxs = v![x*0, for x in reduce_idxs.iter()];
             acc = self.global_load(
@@ -349,7 +409,7 @@ impl Linearizer {
             // }
 
             //println!("reduce idx len {}", reduce_idxs.len());
-            let loop_ctx = self.render_loop(&reduce_idxs);
+            let mut loop_ctx = self.render_loop(&reduce_idxs);
 
             //let mut locals_to_store = vec![];
             // TODO: local_alias i dont see it gets `appended` anyway
@@ -376,7 +436,7 @@ impl Linearizer {
             let iter_ = v![(i, b.clone()), for (i, b) in  self.kernel.bufs.iter().enumerate().skip(1), if self.kernel.earlybufs.contains(b)];
 
             //lb_ex = {b:self.global_load(i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs}
-            let lb_ex = v![(b, self.global_load(i, vec![global_idx.clone(), local_idxs.clone(), reduce_idxs.clone(), full_upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_];
+            let lb_ex = v![(b, self.global_load(i as isize, vec![global_idx.clone(), local_idxs.clone(), reduce_idxs.clone(), full_upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_];
             loaded_buffers.extend(lb_ex);
             // run early ast with reduce
             //panic!("self.kernel.reduceop {:?}", self.kernel.reduceop.as_ref().unwrap().optype);
@@ -405,13 +465,38 @@ impl Linearizer {
                     .concat(),
                     acc.clone(),
                 );
-                //TODO:
+                let mut barrier = self.uop(UOps::BARRIER, None, stores, vec![], false, None, true);
+                if self.kernel.opts.has_local {
+                    let mut fake_idxs = v![num(0), for _ in 0..self.kernel.sts.last().as_ref().unwrap().shape().len()];
+          //          fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
+                    fake_idxs = vec![fake_idxs[..(self.kernel.global_dims()+self.kernel.local_dims) as usize].to_vec(), local_idxs[self.kernel.local_dims as usize..].to_vec(), fake_idxs[(self.kernel.global_dims()+local_idxs.len() as isize) as usize..].to_vec()].concat();
+                    let if_cond = self.render((self.kernel.sts.last().as_ref().unwrap().expr_idxs(Some(fake_idxs)).0.lt(num(1))));
+                    barrier = self.uop_default(UOps::IF, None, vec![if_cond, barrier], vec![]);
+                }
+                //end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]  # noqa: E501
+                let mut end_local_idxs = v![var(&format!("tidx{i}"), 0, if i >= self.kernel.first_reduce() && !self.kernel.upcast_in_mid_reduce_axes().contains(&i) { self.kernel.full_shape()[i]-1 } else { 0 }), for i in 0..self.kernel.first_reduce()+self.kernel.group_for_reduce.len() as isize];
+                let mut local_idxs = vec![local_idxs[..self.kernel.local_dims as usize].to_vec(), end_local_idxs[(self.kernel.global_dims() + self.kernel.local_dims) as usize..].to_vec()].concat();
+
+                for j in self.kernel.upcast_in_mid_reduce_axes() {
+                    self.kernel.reshape_and_permute(None, Some(vec![v![i, for i in 0..self.kernel.shape_len(), if i != j], vec![j]].concat()));
+                    self.upcast();
+                    self.kernel.group_for_reduce.pop();
+                    local_idxs.pop();
+                    end_local_idxs.pop();
+                    upcast_idxs = v![none_var(0, s-1), for s in self.kernel.output_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
+                }
+                acc = self.global_load(-1, vec![fake_global_idx.clone(), local_idxs.clone(),fake_reduce_idxs.clone(),upcast_idxs.clone()].concat(), Some(get_reduce_acc(optype.clone(), float32)), Some(barrier.clone()));
+                loop_ctx = self.render_loop(&end_local_idxs);
+                loaded_buffers.insert(self.kernel.bufs[self.kernel.bufs.len()-1].clone(), self.global_load(-1, vec![fake_global_idx.clone(), local_idxs.clone(),fake_reduce_idxs.clone(),upcast_idxs.clone()].concat(), None, Some(barrier)));
+                self.ast_parse(LazyOp::new(optype.clone(), vec![LazyOp::new(OpType::Buffer(ops::Buffer::Load), vec![], Some(vec![Arg::Buffer(self.kernel.bufs[self.kernel.bufs.len()-1].clone())])).into()], None), &mut acc, Some(&self.acc_offset(-1)), &loaded_buffers, true, Some(&loop_ctx), None);
+                self.load_cache.clear();
+                local_idxs = vec![local_idxs[..self.kernel.local_dims as usize].to_vec(), v![num(0), for _ in 0..self.kernel.group_for_reduce.len()]].concat();
             }
         }
 
         // load late bufs
         let iter_ = v![(i, b.clone()), for (i, b) in  self.kernel.bufs.iter().enumerate(), if !self.kernel.earlybufs.contains(b) && i != 0 && !matches!(b, Buffers::LocalBuffer(_))];
-        loaded_buffers.extend(v![(b, self.global_load(i, vec![global_idx.clone(), local_idxs.clone(), fake_reduce_idxs.clone(), upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_]);
+        loaded_buffers.extend(v![(b, self.global_load(i as isize, vec![global_idx.clone(), local_idxs.clone(), fake_reduce_idxs.clone(), upcast_idxs.clone()].concat(), None, None)), for (i, b) in iter_]);
         let val = self.ast_parse(
             self.kernel.ast.src[0].lo().clone(),
             &mut acc,
@@ -513,7 +598,7 @@ impl Linearizer {
                         uu == self
                             .get_recursive_children(u.clone())
                             .iter()
-                            .sorted_by_key(|x| self.uops.iter().position(|p| &p == x).unwrap())
+                            .sorted_by_cached_key(|x| self.uops.iter().position(|p| &p == x).unwrap())
                             .last()
                             .unwrap()
                     })
@@ -750,12 +835,27 @@ impl Linearizer {
 
     fn global_load(
         &mut self,
-        i: usize,
+        i: isize,
         idxs: Vec<ArcNode>,
         acc: Option<ConstNum>,
         mut barrier: Option<UOp>,
     ) -> Vec<UOp> {
-        let buf = &self.kernel.bufs[i];
+        let buf_i = if i < 0 {
+            self.kernel.bufs.len() as isize + i
+        } else {
+            i
+        } as usize;
+        let sts_i = if i < 0 {
+            self.kernel.sts.len() as isize + i
+        } else {
+            i
+        } as usize;
+        let buf_uops_i = if i < 0 {
+            self.buf_uops.len() as isize + i
+        } else {
+            i
+        } as usize;
+        let buf = &self.kernel.bufs[buf_i];
         let buf_string = format!("{:?}", buf);
         let localtype = buf.dtype();
         let const_ = if let Buffers::ConstBuffer(acc) = buf {
@@ -792,7 +892,7 @@ impl Linearizer {
         ,for (idx, ev) in izip!(idxs.iter(), expand_vars.iter())];
         let (mut g_idx, mut g_valid) = if let Some(d) = dim {
             let d = d as usize;
-            let (mut gidx, mut gvalid) = self.kernel.sts[i].expr_idxs(Some(
+            let (mut gidx, mut gvalid) = self.kernel.sts[sts_i].expr_idxs(Some(
                 vec![
                     &fake_idxs[..d],
                     //            &[float4_expand[0].clone()],
@@ -803,13 +903,13 @@ impl Linearizer {
             if (&gidx / &num(amt as isize) * num(amt as isize)).render_default()
                 != gvalid.render_default()
             {
-                (gidx, gvalid) = self.kernel.sts[i].expr_idxs(Some(fake_idxs.clone()));
+                (gidx, gvalid) = self.kernel.sts[sts_i].expr_idxs(Some(fake_idxs.clone()));
                 amt = 1;
                 dim = None;
             }
             (gidx, gvalid)
         } else {
-            self.kernel.sts[i].expr_idxs(Some(fake_idxs.clone()))
+            self.kernel.sts[sts_i].expr_idxs(Some(fake_idxs.clone()))
         };
         // if amt > 1 {
         //     //TODO: localtype.vectorize()
@@ -872,8 +972,11 @@ impl Linearizer {
                         self.load_cache.insert(key.clone(), tmp);
                     }
                 } else {
-                    assert!(self.buf_uops[i].is_some(), "buffer {i} wasn't UOped");
-                    let buf_uop = self.buf_uops[i].clone().unwrap();
+                    assert!(
+                        self.buf_uops[buf_uops_i].is_some(),
+                        "buffer {i} wasn't UOped"
+                    );
+                    let buf_uop = self.buf_uops[buf_uops_i].clone().unwrap();
                     // WARN: This seem to be always empty
                     // valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
                     // panic!("{:?}", idx.render_default());
@@ -917,13 +1020,23 @@ impl Linearizer {
     }
 
     fn global_store(&mut self, i: isize, idxs: Vec<ArcNode>, store: Vec<UOp>) -> Vec<UOp> {
-        let i = if i < 0 {
-            (self.kernel.bufs.len() as isize + i) as usize
+        let buf_i = if i < 0 {
+            self.kernel.bufs.len() as isize + i
         } else {
-            i as usize
-        };
-        let buf = &self.kernel.bufs[i];
-        let buf_uop = self.buf_uops[i].clone();
+            i
+        } as usize;
+        let buf_uops_i = if i < 0 {
+            self.buf_uops.len() as isize + i
+        } else {
+            i
+        } as usize;
+        let sts_i = if i < 0 {
+            self.kernel.sts.len() as isize + i
+        } else {
+            i
+        } as usize;
+        let buf = &self.kernel.bufs[buf_i];
+        let buf_uop = self.buf_uops[buf_uops_i].clone();
         assert!(buf_uop.is_some(), "buffer {i} wasn't UOped");
         let expanded_node = v![idx.expand(None), for idx in idxs.iter()];
         let mut _idxs = v![x.into_iter().rev().collect::<Vec<ArcNode>>(), for x in cartesian_product(expanded_node.clone().into_iter().rev().collect())];
@@ -931,13 +1044,13 @@ impl Linearizer {
             _idxs = vec![vec![]];
         }
         let store_offset = v![(i, s), for (i, s) in izip!(_idxs, store)];
-        let upcast_dim = self.get_upcast_dim(i);
-        if upcast_dim.len() == 1 && matches!(expanded_node[upcast_dim[0] as usize].len(), 2 | 4) {
-            //TODO: float4
-        }
+        // let upcast_dim = self.get_upcast_dim(i);
+        // if upcast_dim.len() == 1 && matches!(expanded_node[upcast_dim[0] as usize].len(), 2 | 4) {
+        //     //TODO: float4
+        // }
         let mut stores = vec![];
         for (idx, var) in store_offset.iter() {
-            let (idx, valid) = self.kernel.sts[i].expr_idxs(Some(idx.to_vec()));
+            let (idx, valid) = self.kernel.sts[sts_i].expr_idxs(Some(idx.to_vec()));
             let render_idx = self.render(idx);
             if valid.min().unwrap() == 1 {
                 stores.push(self.uop_default(
@@ -964,10 +1077,20 @@ impl Linearizer {
         stores
     }
 
-    fn get_upcast_dim(&self, i: usize) -> Vec<isize> {
+    fn get_upcast_dim(&self, i: isize) -> Vec<isize> {
+        let buf_i = if i < 0 {
+            self.kernel.bufs.len() as isize + i
+        } else {
+            i
+        } as usize;
+        let sts_i = if i < 0 {
+            self.kernel.sts.len() as isize + i
+        } else {
+            i
+        } as usize;
         let should_upcast = self.kernel.opts.support_float4
-            && matches!(self.kernel.bufs[i].dtype(), float32 | float16);
-        v![x, for x in self.kernel.sts[i].unit_stride_axes(false), if should_upcast && x >= self.kernel.shape_len()-self.kernel.upcasted && Shape::from(self.kernel.sts[i].shape_vec())[x] > 1]
+            && matches!(self.kernel.bufs[buf_i].dtype(), float32 | float16);
+        v![x, for x in self.kernel.sts[sts_i].unit_stride_axes(false), if should_upcast && x >= self.kernel.shape_len()-self.kernel.upcasted && Shape::from(self.kernel.sts[sts_i].shape_vec())[x] > 1]
     }
 
     fn ast_parse(
@@ -983,7 +1106,7 @@ impl Linearizer {
         let mut map = HashMap::new();
         let cache = cache.unwrap_or(&mut map);
         if cache.contains_key(&x) {
-            return cache[&x].clone()
+            return cache[&x].clone();
         }
         match &x.optype {
             OpType::Buffer(_) => return loaded_buffers[&x.args[0].to_buf()].clone(),
@@ -1100,16 +1223,17 @@ impl Linearizer {
             return vec![0];
         }
         let upcasted_i = self.kernel.upcasted_axis(i);
-        let r_upcasted_i = upcasted_i
-            .iter()
-            .rev()
-            .map(|c| c.clone())
-            .collect::<Vec<Vec<isize>>>();
+        let r_upcasted_i =
+            upcasted_i
+                .iter()
+                .rev()
+                .map(|c| c.clone())
+                .collect::<Vec<(isize, Option<isize>, isize)>>();
 
         //acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
-        let acc_strides = v![x*(1-r_upcasted_i[i][2]), for (i, x) in strides_for_shape(&v![if ui[2] > 0 { 1 } else { ui[0] }, for ui in r_upcasted_i.iter()]).into_iter().enumerate()];
+        let acc_strides = v![x*(1-r_upcasted_i[i].2), for (i, x) in strides_for_shape(&v![if *r > 0 { 1 } else { *s }, for (s, _, r) in r_upcasted_i.iter()]).into_iter().enumerate()];
         //return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
-        v![t.iter().sum::<isize>(), for t in cartesian_product(v![v![y*acc_strides[i], for y in 0..x[0]], for (i, x) in r_upcasted_i.iter().enumerate()])]
+        v![t.iter().sum::<isize>(), for t in cartesian_product(v![v![y*acc_strides[i], for y in 0..x.0], for (i, x) in r_upcasted_i.iter().enumerate()])]
     }
 }
 
@@ -1119,14 +1243,17 @@ fn get_grouped_dims(
     local_dims: &[isize],
     maxdim: usize,
 ) -> (Vec<ArcNode>, Vec<ArcNode>) {
-    let tmp = if local_dims.len() > maxdim {
-        let mut tmp = local_dims[0..maxdim - 1].to_vec();
-        tmp.push(local_dims[maxdim - 1..].iter().product::<isize>());
-        tmp
+    //local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]  # noqa: E501
+    let mut iter = if local_dims.len() > maxdim {
+        vec![
+            local_dims[..maxdim - 1].to_vec(),
+            vec![prod(&local_dims[maxdim - 1..].to_vec())],
+        ]
+        .concat()
     } else {
-        vec![]
+        local_dims.to_vec()
     };
-    let mut local_idxs = v![var(&format!("{}{}",prefix, start_dim+i), 0, s-1), for (i, s) in if local_dims.len() > maxdim { &tmp } else {local_dims}.iter().enumerate()];
+    let mut local_idxs = v![var(&format!("{}{}",prefix, start_dim+i), 0, s-1), for (i, s) in iter.into_iter().enumerate()];
     let loop_local_idxs = local_idxs.clone();
     if maxdim != 0 && local_dims.len() > maxdim {
         let mut dd = local_idxs[maxdim - 1].clone();

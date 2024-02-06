@@ -112,7 +112,7 @@ pub trait Op: 'static + core::fmt::Debug + Send + Sync {
                     Ternary::Where => self._where(&args[0], &args[1], &args[2]),
                 }
             }
-            _ => unimplemented!("Does not need to implement the rest"),
+            t => unimplemented!("Does not need to implement the rest {t:?}"),
         }
     }
 }

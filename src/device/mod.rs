@@ -33,11 +33,11 @@ lazy_static::lazy_static! {
     };
 }
 
-#[derive(Default, Debug)]
-pub struct PendingCopy(Vec<Vec<u8>>);
-
-unsafe impl Send for PendingCopy {}
-unsafe impl Sync for PendingCopy {}
+// #[derive(Default, Debug)]
+// pub struct PendingCopy(Vec<Vec<u8>>);
+//
+// unsafe impl Send for PendingCopy {}
+// unsafe impl Sync for PendingCopy {}
 
 pub mod cuda;
 pub mod opencl;

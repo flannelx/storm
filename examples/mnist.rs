@@ -131,6 +131,7 @@ fn train<Optim: Optimizer>(
     pb.set_description(format!("loss: {:.2} accuracy {:.2}", 0, 0));
     pb.refresh()?;
     for i in 0..epoch {
+        let s = std::time::Instant::now();
         let x = Tensor::from(&*img_batched[i]).reshape([batch_size, 1, 28, 28]);
         let y = Tensor::from(&*lbl_batched[i]).reshape([batch_size]);
         let out = model.forward(&x);
@@ -145,6 +146,9 @@ fn train<Optim: Optimizer>(
             loss.to_vec()[0],
             accuracy.to_vec()[0]
         ));
+        let e = std::time::Instant::now();
+        let dura = (e - s).as_secs_f64();
+        pb.set_postfix(format!("{:.2}it/s", 1.0 / dura));
         pb.update(1)?;
     }
     Ok(())

@@ -352,7 +352,7 @@ impl Kernel {
         self.first_reduce() - self.local_dims
     }
 
-    pub fn upcasted_axis(&self, i: isize) -> Vec<Vec<isize>> {
+    pub fn upcasted_axis(&self, i: isize) -> Vec<(isize, Option<isize>, isize)> {
         // return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
         //                 self.sts[i].real_strides()[self.shape_len-self.upcasted:],
         //                 [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
@@ -362,9 +362,9 @@ impl Kernel {
         } else {
             i as usize
         };
-        v![vec![a, *b, c], for (a, b, c) in izip!(
+        v![(a, b.clone(), c), for (a, b, c) in izip!(
             self.sts[i].shape()[self.shape_len()-self.upcasted..].to_vec(),
-            Into::<Shape>::into(self.sts[i].real_strides(false).into_iter().map(|s| s.unwrap_or(0)).collect::<Vec<isize>>())[self.shape_len()-self.upcasted..].into_iter(),
+            self.sts[i].real_strides(false)[(self.shape_len()-self.upcasted) as usize..].into_iter(),
             v![if x!=y { 1 } else { 0 }, for (x, y) in izip!(self.sts[0].shape()[self.shape_len()-self.upcasted..].iter(), self.full_shape()[self.shape_len()-self.upcasted..].iter())]
             )
         ]
@@ -570,6 +570,10 @@ impl Kernel {
         v![x-(self.shape_len()-self.upcasted), for x in self.sts[i].unit_stride_axes(false), if x >= self.shape_len()-self.upcasted && self.sts[i].shape()[x]%4 == 0]
     }
 
+    pub fn upcast_in_mid_reduce_axes(&self) -> Vec<isize> {
+        v![j, for j in self.first_reduce()..self.group_for_reduce.len() as isize, if self.full_shape()[j] == self.sts[0].shape()[j]]
+    }
+
     pub fn shape_offsets(&self, i: isize) -> Vec<Vec<isize>> {
         //def shape_offsets(self, i:int): return itertools.product(*[list(range(cast(int, s))) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]  # noqa: E501
         let i = if i < 0 {
@@ -613,8 +617,8 @@ impl Kernel {
             {
                 return;
             }
-            fn has_expanded_axis(shape: &[isize], strides: &[isize]) -> bool {
-                v![*s >1 && *st==0, for (s, st) in izip!(shape, strides)]
+            fn has_expanded_axis(shape: &[isize], strides: &[Option<isize>]) -> bool {
+                v![*s >1 && st.is_some_and(|n| n==0), for (s, st) in izip!(shape, strides)]
                     .iter()
                     .any(|&s| s)
             }
@@ -629,17 +633,11 @@ impl Kernel {
                 .iter()
                 .position(|a| a.eq(&mulop_src[1].lo().args[0].to_buf()))
                 .unwrap()];
-            let strides0: Vec<isize> = st0
-                .real_strides(false)
-                .into_iter()
-                .map(|n| n.unwrap())
-                .collect();
-            let strides1: Vec<isize> = st1
-                .real_strides(false)
-                .into_iter()
-                .map(|n| n.unwrap())
-                .collect();
-            if strides0[self.first_reduce() as usize] == 1
+            let strides0: Vec<Option<isize>> = st0
+                .real_strides(false);
+            let strides1: Vec<Option<isize>> = st1
+                .real_strides(false);
+            if strides0[self.first_reduce() as usize].is_some_and(|n| n  == 1)
                 && !(has_expanded_axis(&st0.shape().dims, &strides0))
                 && has_expanded_axis(&st1.shape().dims, &strides1)
             {
@@ -674,35 +672,35 @@ impl Kernel {
             }
         }
 
-        // if self.opts.has_local && self.opts.has_share {
-        //     if self.float4_axis(0).len() == 0
-        //         && self.first_reduce() <= 2
-        //         && self.first_reduce() + 1 <= self.shape_len()
-        //         && prod(&self.sts[0].shape()[..self.first_reduce()]) <= 2048
-        //     {
-        //         for sz in if prod(&self.sts[0].shape()[..self.first_reduce()]) <= 32 {
-        //             vec![256, 16]
-        //         } else {
-        //             vec![16]
-        //         } {
-        //             if all(
-        //                 &v![st.shape()[self.first_reduce()] % sz == 0 || st.shape()[self.first_reduce()] == 1, for st in self.sts.iter()],
-        //             ) {
-        //                 self.apply_opt(Opt {
-        //                     op: GROUPTOP,
-        //                     axis: Some(0),
-        //                     amt: Some(sz),
-        //                 });
-        //                 break;
-        //             }
-        //         }
-        //     }
-        // }
-        //
-        // if self.group_for_reduce.len() > 0 {
-        //     return;
-        // }
-        //
+        if self.opts.has_local && self.opts.has_share {
+            if self.float4_axis(0).len() == 0
+                && self.first_reduce() <= 2
+                && self.first_reduce() + 1 <= self.shape_len()
+                && prod(&self.sts[0].shape()[..self.first_reduce()]) <= 2048
+            {
+                for sz in if prod(&self.sts[0].shape()[..self.first_reduce()]) <= 32 {
+                    vec![256, 16]
+                } else {
+                    vec![16]
+                } {
+                    if all(
+                        &v![st.shape()[self.first_reduce()] % sz == 0 || st.shape()[self.first_reduce()] == 1, for st in self.sts.iter()],
+                    ) {
+                        self.apply_opt(Opt {
+                            op: GROUPTOP,
+                            axis: Some(0),
+                            amt: Some(sz),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        if self.group_for_reduce.len() > 0 {
+            return;
+        }
+
         let mut to_upcast: Vec<isize> = vec![];
         for axis in 0..self.first_reduce() {
             if self.full_shape()[axis] <= 7
@@ -735,7 +733,7 @@ impl Kernel {
                     && self.full_shape()[axis] % upcast_amount == 0
                         //any(st.views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index, st in enumerate(self.sts)):  # noqa: E501
                     && any(
-                        &v![st.views.last().as_ref().unwrap().strides[axis as usize] == 0 && !any(&v![x[1] == 0, for x in self.upcasted_axis(buf_index as isize)]), for (buf_index, st) in self.sts.iter().enumerate()],
+                        &v![st.views.last().as_ref().unwrap().strides[axis as usize] == 0 && !any(&v![x.1.is_some_and(|s| s == 0), for x in self.upcasted_axis(buf_index as isize)]), for (buf_index, st) in self.sts.iter().enumerate()],
                     )
                 {
                     xb_choices.push(
@@ -765,10 +763,10 @@ impl Kernel {
         //(len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and
         //(self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
 
-        if self.first_reduce() < (self.shape_len() - self.upcasted)
-            && (self.shape_offsets(self.full_buf_idx as isize).len() <= 4
-                || !any(&v![r[2] > 0, for r in self.upcasted_axis(self.full_buf_idx as isize)])) &&
-                (self.upcasted == 0 || prod(&self.full_shape()[-self.upcasted..]) < 64)
-        {}
+        // if self.first_reduce() < (self.shape_len() - self.upcasted)
+        //     && (self.shape_offsets(self.full_buf_idx as isize).len() <= 4
+        //         || !any(&v![r[2] > 0, for r in self.upcasted_axis(self.full_buf_idx as isize)])) &&
+        //         (self.upcasted == 0 || prod(&self.full_shape()[-self.upcasted..]) < 64)
+        // {}
     }
 }

@@ -271,7 +271,7 @@ pub fn create_node(ret: ArcNode) -> ArcNode {
         ret.min().unwrap(),
         ret.max().unwrap()
     );
-    if ret.min().unwrap() == ret.max().unwrap() {
+    if ret.min().unwrap() == ret.max().unwrap() && !ret.is_var(){
         return num(ret.min().unwrap());
     }
     ret

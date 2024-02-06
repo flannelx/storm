@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE};
@@ -237,8 +238,20 @@ impl Default for CLRenderer {
                 half_prekernel: Some("#pragma OPENCL EXTENSION cl_khr_fp16 : enable".into()),
                 barrier: "barrier(CLK_LOCAL_MEM_FENCE);".into(),
                 float4: Some("(float4)".into()),
-                gid: (0..3).map(|i| format!("get_group_id({i})")).collect(),
-                lid: (0..3).map(|i| format!("get_local_id({i})")).collect(),
+                code_for_workitem: HashMap::from([
+                    (
+                        "g".into(),
+                        (0..3).map(|i| format!("get_group_id({i})")).collect(),
+                    ),
+                    (
+                        "l".into(),
+                        (0..3).map(|i| format!("get_local_id({i})")).collect(),
+                    ),
+                    (
+                        "i".into(),
+                        (0..3).map(|i| format!("get_global_id({i})")).collect(),
+                    ),
+                ]),
                 uses_vload: true,
                 ..Default::default()
             }),

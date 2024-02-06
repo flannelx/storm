@@ -1036,8 +1036,12 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
     //already allocated.
     let debug_cache = DEBUG.0.contains("CACHE");
     let debug_kernel = DEBUG.0.contains("KERNEL");
+    let debug_sch = DEBUG.0.contains("SCH");
     while !schedule.is_empty() {
         let mut si = schedule.pop_front().unwrap();
+        if debug_sch {
+            println!("{:?}", si);
+        }
         if DEBUG.0.contains("OP") {
             println!("{:?}\n", si.out.lazyop.optype);
         }
