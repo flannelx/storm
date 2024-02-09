@@ -527,8 +527,11 @@ impl Linearizer {
             .concat(),
             val,
         );
-        // println!("{:?}", val);
-        //println!("{:?}", v![&v.uop, for v in val.iter()]);
+        //println!("{:?}", val);
+        // println!();
+        // for v in val.iter() {
+        //     println!("\n{v:?}");
+        // }
 
         self.optimize_uops();
 
@@ -703,7 +706,7 @@ impl Linearizer {
             let min = self.const_default(x.min().unwrap().to_string());
             let max = self.const_default((x.max().unwrap() + 1).to_string());
             new_loops.insert(
-                x.expr().unwrap().to_string(),
+                x.expr().unwrap_or("").to_string(),
                 self.uop(
                     UOps::LOOP,
                     Some(int32),

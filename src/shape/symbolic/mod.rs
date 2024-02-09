@@ -271,7 +271,7 @@ pub fn create_node(ret: ArcNode) -> ArcNode {
         ret.min().unwrap(),
         ret.max().unwrap()
     );
-    if ret.min().unwrap() == ret.max().unwrap() && !ret.is_var(){
+    if ret.min().unwrap() == ret.max().unwrap() {
         return num(ret.min().unwrap());
     }
     ret
@@ -279,6 +279,8 @@ pub fn create_node(ret: ArcNode) -> ArcNode {
 
 pub fn gcd(mut n: isize, mut m: isize) -> isize {
     assert!(n != 0 && m != 0);
+    n = n.abs();
+    m = m.abs();
     while m != 0 {
         if m < n {
             std::mem::swap(&mut m, &mut n);

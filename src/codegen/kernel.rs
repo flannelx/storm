@@ -298,17 +298,12 @@ impl Kernel {
         }
         let all_ones = v![if s==1 { 1 } else { 0 }, for s in self.full_shape()];
         let first_reduce = self.first_reduce();
-        self.local_dims -= all_ones
-            [(first_reduce - self.local_dims) as usize..first_reduce as usize]
-            .iter()
-            .sum::<isize>();
-        self.upcasted -= all_ones[(self.shape_len() - self.upcasted) as usize..]
-            .iter()
-            .sum::<isize>();
+        self.local_dims -= sum(&all_ones[(first_reduce - self.local_dims) as usize..first_reduce as usize]);
+        self.upcasted -= sum(&all_ones[(self.shape_len() - self.upcasted) as usize..]);
         let ret = all_ones.iter().sum::<isize>() > 0;
         self.reshape_and_permute(
             Some(Box::new(move |shape: Vec<isize>| -> Vec<isize> {
-                v![*x, for (i,x) in shape.iter().enumerate(), if all_ones[i] != 1]
+                v![*x, for (i,x) in shape.iter().enumerate(), if all_ones[i] == 0]
             })),
             None,
         );
@@ -825,9 +820,9 @@ impl Kernel {
             }
         }
 
-        //         && self.local_dims == 0
         // if self.opts.has_local {
         //     if getenv("NOLOCALS", 0) == 1
+        //         && self.local_dims == 0
         //         && self.group_for_reduce.is_empty()
         //     {
         //         self.apply_opt(Opt {

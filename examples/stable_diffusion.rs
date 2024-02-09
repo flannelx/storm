@@ -140,7 +140,7 @@ impl Decoder {
         for (block, upsample) in self.up.iter().rev() {
             println!("\ndecode {}", x.shape());
             for b in block {
-                x = b.call(&x).realize();
+                x = b.call(&x);
             }
             if upsample.len() > 0 {
                 let [bs, c, py, px] = x.shape().dims[..] else {
@@ -149,8 +149,7 @@ impl Decoder {
                 x = x
                     .reshape([bs, c, py, 1, px, 1])
                     .expand([bs, c, py, 2, px, 2])
-                    .reshape([bs, c, py * 2, px * 2])
-                    .realize();
+                    .reshape([bs, c, py * 2, px * 2]);
                 x = upsample[0].call(&x);
             }
             x.realize();
@@ -207,7 +206,6 @@ impl Encoder {
             if downsample.len() > 0 {
                 x = downsample[0].call(&x);
             }
-            x.realize();
         }
         x = self.mid.call(&x);
         self.conv_out.call(&self.norm_out.call(&x).swish())
@@ -484,8 +482,7 @@ impl Upsample {
         let x = x
             .reshape([bs, c, py, 1, px, 1])
             .expand([bs, c, py, 2, px, 2])
-            .reshape([bs, c, py * 2, px * 2])
-            .realize();
+            .reshape([bs, c, py * 2, px * 2]);
         self.conv.call(&x)
     }
 }
@@ -591,78 +588,72 @@ impl UNetModel {
 
         // input block
         for (i, block) in self.input_blocks.iter().enumerate() {
-            //println!("input block {i}");
+            println!("input block {i}");
             for b in block.iter() {
                 match b {
                     UnetComponent::Conv2d(bb) => {
-                        //println!("block {i} conv in\n{}", x.nd());
+                        println!("Conv2d");
                         x = bb.call(&x);
-                        //println!("block {i} conv out\n{}", x.nd());
                     }
                     UnetComponent::ResBlock(bb) => {
-                        //println!("ResBlock");
-                        //println!("block {i} res in\n{}", x.nd());
+                        println!("ResBlock");
                         x = bb.call(&x, &emb);
-                        //println!("block {i} res out\n{}", x.nd());
                     }
                     UnetComponent::SpatialTransformer(bb) => {
-                        //println!("SpatialTransformer");
-                        //println!("block {i} spat in\n{}", x.nd());
+                        println!("SpatialTransformer");
                         x = bb.call(&x, context.clone());
-                        //println!("block {i} spat out\n{}", x.nd());
                     }
                     UnetComponent::Downsample(bb) => {
-                        //println!("Downsample");
+                        println!("Downsample");
                         x = bb.call(&x);
                     }
                     _ => panic!(),
                 }
-                //println!("{}", x.nd());
             }
             x.realize();
+            println!("realized");
             save_inputs.push(x.clone());
         }
 
         for (i, block) in self.mid_blocks.iter().enumerate() {
             match block {
                 UnetComponent::ResBlock(bb) => {
-                    //println!("ResBlock");
+                    println!("ResBlock");
                     x = bb.call(&x, &emb);
                 }
                 UnetComponent::SpatialTransformer(bb) => {
-                    //println!("SpatialTransformer");
+                    println!("SpatialTransformer");
                     x = bb.call(&x, context.clone());
                 }
                 _ => panic!(),
-                //println!("{}", x.nd());
             }
             x.realize();
+            println!("realized");
         }
 
         for (i, block) in self.output_blocks.iter().enumerate() {
-            //println!("output block {i}");
+            println!("output block {i}");
             x = x.cat(&[save_inputs.pop().unwrap()], Some(1)).realize();
             for b in block.iter() {
                 match b {
                     UnetComponent::Conv2d(bb) => {
-                        //println!("Conv2d");
+                        println!("Conv2d");
                         x = bb.call(&x);
                     }
                     UnetComponent::ResBlock(bb) => {
-                        //println!("ResBlock");
+                        println!("ResBlock");
                         x = bb.call(&x, &emb);
                     }
                     UnetComponent::SpatialTransformer(bb) => {
-                        //println!("SpatialTransformer");
+                        println!("SpatialTransformer");
                         x = bb.call(&x, context.clone());
                     }
                     UnetComponent::Upsample(bb) => {
-                        //println!("Upsample");
+                        println!("Upsample");
                         x = bb.call(&x);
                     }
                     _ => panic!(),
                 }
-                //println!("{}", x.nd());
             }
             x.realize();
         }
@@ -1062,9 +1053,7 @@ impl StableDiffusion {
         alphas_prev: &Tensor,
         guidence: &Tensor,
     ) -> Tensor {
-        let e_t = self
-            .get_model_output(uncond_context, context, latent, timestep, guidence)
-            .realize();
+        let e_t = self.get_model_output(uncond_context, context, latent, timestep, guidence);
         let (x_prev, _) = self.get_x_prev_and_pred_x0(latent, &e_t, alphas, alphas_prev);
         x_prev.realize()
     }
@@ -1549,7 +1538,7 @@ fn main() {
             &Tensor::_const(alphas[index]),
             &Tensor::_const(alphas_prev[index]),
             &Tensor::_const(guidance),
-        );
+        ).realize();
         // println!("{}", latent.nd());
     }
 

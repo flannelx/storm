@@ -189,34 +189,50 @@ impl Function for Contiguous {
     }
 
     fn parents_mut(&mut self) -> &mut Ctx {
-        todo!()
+        &mut self.ctx
     }
 
     fn parents_ref(&self) -> &Ctx {
-        todo!()
+        &self.ctx
     }
-    // fn forward(
-    //     &mut self,
-    //     x: &B,
-    //     _: Option<&B>,
-    //     _: Option<&B>,
-    //     _: Option<Shape>,
-    //     _: Option<B::Dtype>,
-    // ) -> B {
-    //     x.contiguous()
-    // }
-    //
-    // fn backward(&mut self, grad: B) -> Grad {
-    //     Grad::One(grad)
-    // }
-    //
-    // fn parents_mut(&mut self) -> &mut Ctx {
-    //     &mut self.ctx
-    // }
-    //
-    // fn parents_ref(&self) -> &Ctx {
-    //     &self.ctx
-    // }
+}
+
+#[derive(Clone, Debug)]
+pub struct ContiguousBackward {
+    pub(crate) ctx: Ctx,
+}
+
+impl Default for ContiguousBackward {
+    fn default() -> Self {
+        Self {
+            ctx: Ctx::default(),
+        }
+    }
+}
+
+impl Function for ContiguousBackward {
+    fn forward(
+        &mut self,
+        x: &LazyBuffer,
+        y: Option<&LazyBuffer>,
+        z: Option<&LazyBuffer>,
+        shape: Option<&[isize]>,
+        const_: Option<Vec<u8>>,
+    ) -> LazyBuffer {
+        x.clone()
+    }
+
+    fn backward(&mut self, grad: &LazyBuffer) -> Grad {
+        Grad::One(grad.contiguous())
+    }
+
+    fn parents_mut(&mut self) -> &mut Ctx {
+        &mut self.ctx
+    }
+
+    fn parents_ref(&self) -> &Ctx {
+        &self.ctx
+    }
 }
 
 #[derive(Clone, Debug)]

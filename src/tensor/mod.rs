@@ -122,6 +122,10 @@ impl Tensor {
         Contiguous::default().apply(self, None, None, None, None)
     }
 
+    pub fn contiguous_backward(&self) -> Self {
+        ContiguousBackward::default().apply(self, None, None, None, None)
+    }
+
     // TODO: This is probably stuck with generic param.
     //      Or have three verions of this. 1. T, 2. String, 3. Raw bytes
     pub fn to_vec(&self) -> Vec<TensorDefaultType> {
@@ -808,7 +812,7 @@ impl Tensor {
             x + bias.reshape(vec![vec![1,-1], vec![1;hw.len()]].concat())
         } else {
             x
-        }
+        }.contiguous().contiguous_backward()
     }
 
     pub fn t(&self) -> Self {
@@ -1023,10 +1027,8 @@ impl Tensor {
     }
 
     pub fn _arange(start: f32, stop: f32, step: f32) -> Self {
-        // if stop is None: stop, start = start, 0
-        // return Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
         let s = ((stop - start) / step).ceil() as isize;
-        Self::full([s], step).cumsum() + (start - step)
+        Self::_const(step).expand([s]).cumsum() + (start - step)
     }
 
     pub fn full<S: Into<Vec<isize>>>(shape: S, const_: impl NumType) -> Self {
@@ -1190,9 +1192,6 @@ impl Tensor {
     pub fn realize(&self) -> Self {
         let mut seen = HashSet::new();
         let mut ret = self.clone();
-        if matches!(ret.buffer.lazyop.optype, OpType::Movement(_)) {
-            ret = ret + 0;
-        }
         run_schedule(ret.buffer.schedule(&mut seen));
         ret
     }
@@ -1359,7 +1358,7 @@ impl Tensor {
                 .iter()
                 .map(|&s| s as usize)
                 .collect::<Vec<usize>>(),
-            self.to_vec(),
+            self.contiguous().to_vec(),
         )
         .unwrap()
     }

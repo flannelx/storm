@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::prelude::*;
 use crate::view;
 
 pub use util::*;
@@ -59,6 +60,36 @@ impl ShapeTracker {
         };
 
         Self { views }
+    }
+
+    pub fn invert(&self, out_shape: &[isize]) -> Option<Self> {
+        let shapes = v![s, for (v, s) in izip!(self.views.iter().rev(), vec![v![x.shape.clone(), for x in self.views.iter().rev().skip(1)], vec![out_shape.to_vec()]].concat())];
+        let ret =
+            v![v.invert(&s), for (v, s) in izip!(self.views.iter().rev(), shapes.into_iter())];
+        if all(&v![x.is_some(), for x in ret.iter()]) {
+            Some(
+                Self {
+                    views: v![x.unwrap(), for x in ret.into_iter()],
+                }
+                .reshape(out_shape),
+            )
+        } else {
+            None
+        }
+    }
+
+    pub fn concat(&self, st: &Self) -> Self {
+        let mut ret = self.clone();
+        for v in st.views.iter() {
+            ret = ShapeTracker {
+                views: vec![ret.views.clone(), vec![v.clone()]].concat(),
+            }
+            .simplify();
+        }
+        if ret.shape().dims.contains(&0) {
+            panic!();
+        }
+        ret
     }
 
     pub fn from_shape(shape: &[isize]) -> Self {
@@ -185,66 +216,7 @@ impl ShapeTracker {
             idxs_to_idx(&self.views[self.views.len() - 1].shape, &idxs),
             None,
         );
-        //println!("{:?} {:?}", idx.render_default(), valid.render_default());
         self._expr_idx(idx, valid)
-
-    //     let idxs = if let Some(i) = idxs {
-    //         i
-    //     } else {
-    //         self.shape_vec()
-    //             .iter()
-    //             .enumerate()
-    //             .map(|(i, sh)| var(&format!("idx{i}"), 0, sh - 1))
-    //             .collect()
-    //     };
-    //     let (mut idx, mut valid) = _expr_view(&self.views[self.views.len() - 1], &idxs, None);
-    //     println!(
-    //         "{:?} {:?} {:?}",
-    //         self.views[self.views.len() - 1],
-    //         idx.render_default(),
-    //         valid.render_default()
-    //     );
-    //     if self.views.len() > 2 {
-    //         for view in self.views[..self.views.len() - 2].iter().rev() {
-    //             if valid.max().unwrap() > 0 {
-    //                 return (num(-1), valid);
-    //             }
-    //             let view = view.minify();
-    //             let mut acc = 1;
-    //             let mut idxs = vec![];
-    //             for d in view.shape.iter().rev() {
-    //                 idxs.push((idx.clone() / num(acc)) % num(*d));
-    //                 acc *= d;
-    //             }
-    //             idxs.reverse();
-    //             (idx, valid) = _expr_view(&view, &idxs, Some(valid));
-    //         }
-    //     }
-    //     (idx, valid)
-    // }
-
-    // pub fn expr_node(&self, idx: Option<ArcNode>) -> (ArcNode, ArcNode) {
-    //     let idx = if let Some(i) = idx {
-    //         i
-    //     } else {
-    //         var(
-    //             "idx",
-    //             0,
-    //             self.views.last().unwrap().shape.iter().product::<isize>() - 1,
-    //         )
-    //     };
-    //     self._expr_idx(
-    //         self.views[self.views.len() - 1].expr_node(Some(idx.clone())),
-    //         self.views[self.views.len() - 1].expr_node_mask(idx, None),
-    //     )
-    // }
-
-    // pub fn expr_node_str(&self, _idx: &str) -> (ArcNode, ArcNode) {
-    //     let idx = var("idx", 0, self.shape_vec().iter().product());
-    //     self._expr_idx(
-    //         self.views[self.views.len() - 1].expr_node(Some(idx.clone())),
-    //         self.views[self.views.len() - 1].expr_node_mask(idx, None),
-    //     )
     }
 
     pub fn axis_is_masked(&self, axis: isize) -> bool {

@@ -1,6 +1,7 @@
 use super::util::*;
 use crate::prelude::*;
 use crate::shape::symbolic::{ands, num, sum, var, ArcNode};
+use crate::tensor::mlops::argsort;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct View {
@@ -18,18 +19,16 @@ impl View {
         offset: Option<isize>,
         mask: Option<Vec<(isize, isize)>>,
     ) -> Self {
+        if shape == [32, 11, 0, 4, 16] {
+            panic!();
+        }
         let strides = if let Some(s) = strides {
             filter_strides(&shape, &s)
         } else {
             strides_for_shape(&shape)
         };
         let offset = if let Some(val) = offset { val } else { 0 };
-        let contiguous = offset == 0
-            && mask.is_none()
-            && strides
-                .iter()
-                .zip(strides_for_shape(shape).iter())
-                .all(|(s1, s2)| s1 == s2);
+        let contiguous = offset == 0 && mask.is_none() && strides == strides_for_shape(shape);
         Self {
             shape: shape.to_vec(),
             strides,
@@ -38,6 +37,21 @@ impl View {
             contiguous,
         }
     }
+
+    pub fn invert(&self, out_shape:&[isize]) -> Option<Self> {
+        let mut ret = view!(self.shape);
+        if let Some(m) = &self.mask {
+            ret.shrink(m);
+        }
+        //ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
+        ret = ret.stride(&v![if x < 0 { -1 } else { 1 }, for &x in self.strides.iter()]).permute(&argsort(v![if x > 0 { -x } else { x }, for &x in self.strides.iter()]));
+        if prod(&ret.shape) == prod(out_shape) {
+            Some(ret)
+        } else {
+            None
+        }
+    }
+
 
     pub fn expr_node_mask(&self, idx: ArcNode, valid: Option<ArcNode>) -> ArcNode {
         let mut expr = if let Some(n) = valid { vec![n] } else { vec![] };
@@ -76,8 +90,10 @@ impl View {
         assert!(
             idxs.len() == self.shape.len(),
             "{} {:?}\n{} {:?}",
-            idxs.len(), idxs,
-            self.shape.len(), self.shape
+            idxs.len(),
+            idxs,
+            self.shape.len(),
+            self.shape
         );
         let mut ret = vec![];
         if self.offset != 0 {
@@ -209,11 +225,12 @@ impl View {
         if self.shape == new_shape {
             return Some(self.clone());
         }
-        assert!(new_shape.iter().all(|&sh| sh > 0), "{:?}", new_shape);
+        assert!(new_shape.iter().all(|&sh| sh >= 0), "{:?}", new_shape);
         if self.shape.contains(&0) {
             assert!(
                 new_shape.contains(&0),
-                "cannot reshape 0 size to {new_shape:?}"
+                "cannot reshape 0 in self shape {:?} to {new_shape:?}",
+                self.shape
             );
             return Some(view!(new_shape));
         }
@@ -292,32 +309,6 @@ impl View {
             Some(self.offset),
             new_mask,
         )
-        // let mut new_shape = vec![];
-        // let mut new_stride = vec![];
-        // let mut new_mask = vec![];
-        // for &i in axis.iter() {
-        //     let i = if i >= 0 {
-        //         i as usize
-        //     } else {
-        //         (self.strides.len() as isize + i) as usize
-        //     };
-        //     new_shape.push(self.shape[i]);
-        //     new_stride.push(self.strides[i]);
-        //     if let Some(m) = &self.mask {
-        //         new_mask.push(m[i])
-        //     }
-        // }
-        // let new_view = View::new(
-        //     &new_shape,
-        //     Some(new_stride),
-        //     Some(self.offset),
-        //     if self.mask.is_some() {
-        //         Some(new_mask)
-        //     } else {
-        //         None
-        //     },
-        // );
-        // new_view
     }
 
     pub fn stride(&self, mul: &[isize]) -> Self {
@@ -360,7 +351,8 @@ impl View {
     }
 
     pub fn minify(&self) -> View {
-        let min_shape = v![x.0, for x in _merge_dims(&self.shape, &self.strides, self.mask.clone())];
+        let min_shape =
+            v![x.0, for x in _merge_dims(&self.shape, &self.strides, self.mask.clone())];
         if let Some(v) = self.reshape(&min_shape) {
             v
         } else {

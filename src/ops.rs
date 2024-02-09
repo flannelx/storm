@@ -236,6 +236,13 @@ impl From<LazyBuffer> for LazyOpSrc {
 }
 
 impl LazyOpSrc {
+    pub fn st(&self) -> Vec<ShapeTracker> {
+        match self {
+            LazyOpSrc::LazyOp(lo) => v![los.st(), for los in lo.src.iter()].concat(),
+            LazyOpSrc::LazyBuffer(lb) => vec![lb.st.clone()],
+        }
+    }
+
     pub fn is_realized(&self) -> bool {
         match self {
             LazyOpSrc::LazyOp(op) => op.is_realized(),
