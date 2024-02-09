@@ -318,14 +318,20 @@ impl LazyBuffer {
         create_schedule(vec![self], None).into()
     }
 
-    pub fn _view(&self, op:Movement, new_st: ShapeTracker) -> Self {
+    pub fn _view(&self, op: Movement, new_st: ShapeTracker) -> Self {
         if self.st.size() == 0 {
             return Self::_const(0, self.dtype.clone(), &self.device).reshape(&new_st.shape().dims);
         }
         if new_st.contiguous() && self.base_ref().shape == new_st.shape().dims {
             self.base()
         } else {
-            create_lazybuffer(&self.device.clone(), new_st, LazyOp::new(OpType::Movement(op), vec![], None), self.dtype.clone(), Some(Arc::new(self.base())))
+            create_lazybuffer(
+                &self.device.clone(),
+                new_st,
+                LazyOp::new(OpType::Movement(op), vec![], None),
+                self.dtype.clone(),
+                Some(Arc::new(self.base())),
+            )
         }
     }
 
@@ -422,10 +428,7 @@ impl LazyBuffer {
         if arg == &(0..arg.len()).map(|v| v as isize).collect::<Vec<isize>>() {
             return self.clone();
         }
-        self._view(
-            Movement::Permute,
-            self.st.permute(arg),
-        )
+        self._view(Movement::Permute, self.st.permute(arg))
     }
 
     pub fn shrink(&self, arg: &[isize]) -> Self {
@@ -884,14 +887,7 @@ pub fn _recursive_lb<'a>(
                 realizes.insert(buf_base);
             }
         }
-        return _recursive_lb(
-            buf_base,
-            realizes,
-            allbufs,
-            simple_pads,
-            children,
-            None,
-        );
+        return _recursive_lb(buf_base, realizes, allbufs, simple_pads, children, None);
     }
     if buf.force_realize {
         realizes.insert(buf);
@@ -1177,9 +1173,6 @@ pub fn create_schedule<'a>(
             reduce_for_op.insert(realized_child.keys().next().unwrap(), r);
         }
     }
-    //println!("--> {:?} {} {}", outs.len(),seen.len(), realizes.len());
-    let ret = v![_recursive_schedule(x.base_ref(), seen, &mut realizes, &mut reduce_for_op), for x in outs]
-        .concat();
-    //println!("{} {:?}", ret.len(), ret[0].ast.src[0].src());
-    ret
+    v![_recursive_schedule(x.base_ref(), seen, &mut realizes, &mut reduce_for_op), for x in outs]
+        .concat()
 }

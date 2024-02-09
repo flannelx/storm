@@ -76,9 +76,7 @@ pub trait Device: Send + Sync + core::fmt::Debug {
     fn renderer(&self) -> Arc<dyn Renderer>;
     fn get_lin(&self, ast: LazyOp) -> Linearizer {
         let mut ret = Linearizer::new(ast, Some(self.linearizer_opts()));
-        if getenv("OP", 0) == 1 {
-            ret.kernel.hand_coded_optim();
-        }
+        ret.kernel.hand_coded_optim();
         ret
     }
     fn render(&self, mut lin: Linearizer) -> (String, String) {

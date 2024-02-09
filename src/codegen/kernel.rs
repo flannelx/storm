@@ -590,6 +590,12 @@ impl Kernel {
         }
     }
 
+    pub fn full_unupcasted_shape(&self) -> Shape {
+        self.full_shape()[..self.shape_len() - self.upcasted]
+            .to_vec()
+            .into()
+    }
+
     pub fn hand_coded_optim(&mut self) {
         use OptOps::*;
         let MV_BLOCKSIZE = getenv("MV_BLOCKSIZE", 4);
@@ -860,11 +866,5 @@ impl Kernel {
         //         }
         //     }
         // }
-    }
-
-    pub fn full_unupcasted_shape(&self) -> Shape {
-        self.full_shape()[..self.shape_len() - self.upcasted]
-            .to_vec()
-            .into()
     }
 }
