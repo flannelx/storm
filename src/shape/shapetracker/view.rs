@@ -38,20 +38,23 @@ impl View {
         }
     }
 
-    pub fn invert(&self, out_shape:&[isize]) -> Option<Self> {
+    pub fn invert(&self, out_shape: &[isize]) -> Option<Self> {
         let mut ret = view!(self.shape);
         if let Some(m) = &self.mask {
             ret.shrink(m);
         }
         //ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
-        ret = ret.stride(&v![if x < 0 { -1 } else { 1 }, for &x in self.strides.iter()]).permute(&argsort(v![if x > 0 { -x } else { x }, for &x in self.strides.iter()]));
+        ret = ret
+            .stride(&v![if x < 0 { -1 } else { 1 }, for &x in self.strides.iter()])
+            .permute(&argsort(
+                v![if x > 0 { -x } else { x }, for &x in self.strides.iter()],
+            ));
         if prod(&ret.shape) == prod(out_shape) {
             Some(ret)
         } else {
             None
         }
     }
-
 
     pub fn expr_node_mask(&self, idx: ArcNode, valid: Option<ArcNode>) -> ArcNode {
         let mut expr = if let Some(n) = valid { vec![n] } else { vec![] };
@@ -132,8 +135,12 @@ impl View {
                 );
             }
         }
+        let shape = arg.iter().map(|(x, y)| y - x).collect::<Vec<isize>>();
+        if let Some(ref m) = mask && all(&v![m.0 == 0 && m.1 == s, for (m, &s) in izip!(m, shape.iter())]) {
+            mask = None;
+        }
         View::new(
-            &arg.iter().map(|(x, y)| y - x).collect::<Vec<isize>>(),
+            &shape,
             Some(self.strides.clone()),
             Some(self.offset + offset),
             mask,
@@ -160,13 +167,7 @@ impl View {
             .shape
             .iter()
             .zip(arg.iter())
-            .all(|(&sh, &(b, e))| b >= 0 && e <= sh));
-        assert!(
-            arg.len() == self.shape.len(),
-            "{:?}.len() != {:?}.len()",
-            arg,
-            self.shape
-        );
+            .all(|(&sh, &(b, e))| 0 <= b  &&  b <= e && e <= sh));
         self.__unsafe_resize(arg, None)
     }
 

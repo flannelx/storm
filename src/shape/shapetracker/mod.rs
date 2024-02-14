@@ -176,18 +176,12 @@ impl ShapeTracker {
     }
 
     pub fn simplify(&self) -> Self {
-        if self.views.len() < 2 {
-            return self.clone();
+        if self.views.len() >= 2  && let Some(new_view) = merge_views(&self.views[self.views.len() - 2], &self.views[self.views.len() - 1]) {
+            return Self {
+                views: vec![self.views[..self.views.len()-2].to_vec(), vec![new_view]].concat(),
+            }.simplify();
         }
-        let l = self.views.len();
-        let mut ret = self.clone();
-        if let Some(new_view) = merge_view(&self.views[l - 2], &self.views[l - 1]) {
-            ret.views.pop();
-            ret.views.pop();
-            ret.views.push(new_view);
-            ret = ret.simplify();
-        }
-        ret
+        self.clone()
     }
 
     pub fn _expr_idx(&self, mut idx: ArcNode, mut valid: ArcNode) -> (ArcNode, ArcNode) {
@@ -249,12 +243,14 @@ impl ShapeTracker {
     }
 
     pub fn reshape(&self, new_shape: &[isize]) -> Self {
-        let new_view = self.views[self.views.len() - 1].reshape(new_shape);
         let mut views = self.views.clone();
-        if let Some(nv) = new_view {
-            views.pop();
-            views.push(nv);
-            return ShapeTracker { views };
+        if getenv("MERGE_VIEW", 1) > 0 {
+            let new_view = self.views[self.views.len() - 1].reshape(new_shape);
+            if let Some(nv) = new_view {
+                views.pop();
+                views.push(nv);
+                return ShapeTracker { views };
+            }
         }
         views.push(view!(new_shape));
         ShapeTracker { views }

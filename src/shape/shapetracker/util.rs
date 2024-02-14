@@ -2,7 +2,7 @@ use crate::{
     izip,
     shape::{
         shapetracker::ShapeTracker,
-        symbolic::{sum, ArcNode},
+        symbolic::{num, sum, var, ArcNode},
     },
     v,
 };
@@ -120,7 +120,7 @@ pub fn idxs_to_idx(shape: &[isize], idxs: &[ArcNode]) -> ArcNode {
     sum(&ret)
 }
 
-pub fn merge_view(vm2: &View, vm1: &View) -> Option<View> {
+pub fn merge_views(vm2: &View, vm1: &View) -> Option<View> {
     if vm1.contiguous && vm1.shape == vm2.shape {
         return Some(vm2.clone());
     }
@@ -161,6 +161,151 @@ pub fn merge_view(vm2: &View, vm1: &View) -> Option<View> {
     //     vm1.mask.clone(),
     // ))
 }
+
+use crate::prelude::*;
+
+fn un1d(shape: &[isize], mut offset: isize) -> Vec<isize> {
+    let strides = strides_for_shape(shape);
+    let mut result = vec![];
+    for stride in strides {
+        let here = if stride > 0 { offset / stride } else { 0 };
+        result.push(here);
+        offset -= here * stride;
+    }
+    result
+}
+
+// pub fn merge_views(vm2: &View, vm1: &View) -> Option<View> {
+//     if vm1.contiguous && vm1.shape == vm2.shape {
+//         return Some(vm2.clone());
+//     }
+//     if vm2.contiguous {
+//         return Some(vm1.clone());
+//     }
+//     let rstrides = ShapeTracker {
+//         views: vec![vm2.clone(), vm1.clone()],
+//     }
+//     .real_strides(false);
+//     if vm2.mask.is_none() && vm1.offset == 0 && !rstrides.contains(&None) {
+//         return Some(view!(
+//             vm1.shape,
+//             rstrides
+//                 .into_iter()
+//                 .map(|s| s.unwrap())
+//                 .collect::<Vec<isize>>(),
+//             vm2.offset,
+//             vm1.mask.clone()
+//         ));
+//     }
+//
+//     if let Some(vm1_mask) = &vm1.mask {
+//         for &(b, e) in vm1_mask {
+//             if !(b < e) {
+//                 return Some(view!(
+//                     vm1.shape,
+//                     vec![0; vm1.shape.len()],
+//                     0,
+//                     Some(vec![(0, 0); vm1.shape.len()])
+//                 ));
+//             }
+//         }
+//         println!("{:?}", vm1);
+//         let merged = merge_views(vm2, &vm1.shrink(&vm1_mask));
+//         if let Some(m) = merged {
+//             return Some(m.pad(&v![(b, s-e), for (&(b, e), s) in izip!(vm1_mask, vm1.shape.clone())]));
+//         } else {
+//             return None;
+//         }
+//     }
+//
+//     let origin = un1d(&vm2.shape, vm1.offset);
+//     let mut terms = vec![vec![]; origin.len()];
+//     let mut strides = vec![0; vm1.shape.len()];
+//     for (d1, &st) in vm1.strides.iter().enumerate() {
+//         if st == 0 {
+//             continue;
+//         }
+//         for (d2, (o, s1)) in izip!(origin.iter(), un1d(&vm2.shape, vm1.offset + st)).enumerate() {
+//             let s1 = s1 - o;
+//             if s1 == 0 {
+//                 continue;
+//             }
+//             terms[d2].push((d1, s1));
+//             strides[d1] += s1 * vm2.strides[d2];
+//         }
+//     }
+//     let mut idxs = v![var(&format!("idx{i}"),0, s-1), for (i, s) in vm1.shape.iter().enumerate()];
+//     let mut merged_size = 1;
+//     let mut merged_term = num(0);
+//     let mut extends = vec![];
+//     for (term, s, o) in izip!(
+//         terms.iter().rev(),
+//         vm2.shape.iter().rev(),
+//         origin.iter().rev()
+//     ) {
+//         merged_term = &merged_term
+//             + sum(&v![&idxs[d1] * (num(s1) * &merged_term),for &(d1, s1) in term.iter()])
+//             + num(o * merged_size);
+//         merged_size *= s;
+//         if merged_term.ge(num(merged_size)).is_num() && merged_term.lt(num(0)).is_num() {
+//             extends.push((merged_size, merged_term));
+//             merged_size = 1;
+//             merged_term = num(0);
+//         }
+//     }
+//     if merged_term.is_var() || (merged_term.is_num() && merged_term.num_val().unwrap() > 0) {
+//         return None;
+//     }
+//     let vm2_shape = v![*s, for (s, _) in extends.iter().rev()];
+//     if vm2_shape != vm2.shape {
+//         let reshape_vm2 = vm2.reshape(&vm2_shape);
+//         if let Some(new_shape) = reshape_vm2 {
+//             return merge_views(&new_shape, vm1);
+//         } else {
+//             return None;
+//         }
+//     }
+//
+//     if let Some(vm2_mask) = &vm2.mask {
+//         let mut newb = vec![0; vm1.shape.len()];
+//         let mut newe = vm1.shape.clone();
+//         let mut bad = false;
+//         //x: ((&(isize, isize), &isize), &(isize, ArcNode)) // size = 24 (0x18), align = 0x8
+//         for (d2, ((&(b, e), &o), (_, t))) in vm2_mask
+//             .iter()
+//             .zip(origin.iter())
+//             .zip(extends.iter().rev())
+//             .enumerate()
+//         {
+//             if t.min().is_some_and(|m| m < b) || t.max().is_some_and(|m| m >= e) {
+//                 continue;
+//             }
+//             let term = &terms[d2];
+//             if term.len() != 1 {
+//                 if term.len() > 0 && newe.len() > 0 {
+//                     newe[0] = 0;
+//                 }
+//                 else {
+//                     bad = true;
+//                 }
+//                 continue;
+//             }
+//             let (d1, s1) = term[0];
+//             newb[d1] = newb[d1].max(((( if s1 > 0  { b - o } else {e - o - 1}) as f32 / s1 as f32).ceil() as isize));
+//             newe[d1] = newe[d1].min((if s1 < 0 { b - o } else  { e - o - 1}) / s1 + 1);
+//         }
+//
+//         for (&b, &e, &s) in izip!(newb.iter(), newe.iter(), vm1.shape.iter()) {
+//             if b != 0 || e != s {
+//                 return merge_views(vm2, &view!(vm1.shape,vm1.strides, vm1.offset, Some(v![x, for x in izip!(newb, newe)])));
+//             }
+//         }
+//         if bad {
+//             return None;
+//         }
+//     }
+//     Some(view!(vm1.shape, strides, crate::utils::sum(&v![o * s, for (o, s) in izip!(origin, vm2.strides.clone())]) + vm2.offset))
+// }
 
 pub fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
     let (shape, mask, strides, offset) = (&view.shape, &view.mask, &view.strides, view.offset);
@@ -230,7 +375,7 @@ pub fn _reshape(view: &View, new_shape: &[isize]) -> (View, bool) {
     if view.contiguous {
         return (new_view, false);
     }
-    if let Some(merged_view) = merge_view(view, &new_view) {
+    if let Some(merged_view) = merge_views(view, &new_view) {
         return (merged_view, false);
     }
     return (new_view, true);

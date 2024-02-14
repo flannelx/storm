@@ -1475,13 +1475,14 @@ use show_image::{create_window, ImageInfo, ImageView};
 
 #[show_image::main]
 fn main() {
+    std::env::set_var("MERGE_VIEW", "0");
     let mut model = StableDiffusion::new();
     model.alphas_comprod = alpha_cumprod();
     load_text_model(model.cond_stage_model.as_mut().unwrap());
     load_vae(&mut model.first_stage_model);
     load_unet(&mut model.model);
     let tokenizer = Tokenizer::new();
-    let tokens = tokenizer.encode("a cat");
+    let tokens = tokenizer.encode("astronaut on the moon");
     let prompt =
         Tensor::from(tokens.iter().map(|&e| e as f32).collect::<Vec<f32>>()).reshape([1, -1]);
     let context = model

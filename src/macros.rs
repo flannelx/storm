@@ -219,7 +219,7 @@ macro_rules! view {
             &$shape.to_vec(),
             Some($strides.to_vec()),
             Some($offset),
-            Some($mask.to_vec()),
+            $mask,
         )
     };
 }

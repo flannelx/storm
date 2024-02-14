@@ -348,7 +348,7 @@ impl Linearizer {
             self.global_size =
                 Some(v![(x.max().unwrap() + 1 ) as usize, for x in loop_global_idxs.iter().rev()]);
             self.local_size = Some(
-                v![(x.max().unwrap() + 1 ) as usize, for x in loop_local_idxs.iter().rev().rev()],
+                v![(x.max().unwrap() + 1 ) as usize, for x in loop_local_idxs.iter().rev()],
             );
 
             let mut extend_loop_uops = HashMap::new();
@@ -481,7 +481,7 @@ impl Linearizer {
                     //fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
                     fake_idxs = vec![fake_idxs[..(self.kernel.global_dims()+self.kernel.local_dims) as usize].to_vec(), local_idxs[self.kernel.local_dims as usize..].to_vec(), fake_idxs[(self.kernel.global_dims()+local_idxs.len() as isize) as usize..].to_vec()].concat();
                     let if_cond = self.render((self.kernel.sts.last().as_ref().unwrap().expr_idxs(Some(fake_idxs)).0.lt(num(1))));
-                    barrier = self.uop_default(UOps::IF, None, vec![if_cond, barrier], vec![]);
+                    barrier = self.uop(UOps::IF, None, vec![if_cond, barrier], vec![],false, None, true);
                 }
                 //end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]  # noqa: E501
                 let mut end_local_idxs = v![var(&format!("tidx{i}"), 0, if i >= self.kernel.first_reduce() && !self.kernel.upcast_in_mid_reduce_axes().contains(&i) { self.kernel.full_shape()[i]-1 } else { 0 }), for i in 0..self.kernel.first_reduce()+self.kernel.group_for_reduce.len() as isize];
@@ -493,9 +493,9 @@ impl Linearizer {
                     self.kernel.group_for_reduce.pop();
                     local_idxs.pop();
                     end_local_idxs.pop();
-                    upcast_idxs = v![none_var(0, s-1), for s in self.kernel.output_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter()];
+                    upcast_idxs = v![var(&format!("_uidx{i}"), 0, s-1), for (i, s) in self.kernel.output_shape()[(self.kernel.shape_len()-self.kernel.upcasted) as usize..].iter().enumerate()];
                 }
-                acc = self.global_load(-1, vec![fake_global_idx.clone(), local_idxs.clone(),fake_reduce_idxs.clone(),upcast_idxs.clone()].concat(), Some(get_reduce_acc(optype.clone(), float32)), Some(barrier.clone()));
+                acc = self.global_load(-1, vec![fake_global_idx.clone(), local_idxs.clone(),fake_reduce_idxs.clone(),upcast_idxs.clone()].concat(), Some(get_reduce_acc(optype.clone(), float32)), None);
                 loop_ctx = self.render_loop(&end_local_idxs);
                 loaded_buffers.insert(self.kernel.bufs[self.kernel.bufs.len()-1].clone(), self.global_load(-1, vec![fake_global_idx.clone(), local_idxs.clone(),fake_reduce_idxs.clone(),upcast_idxs.clone()].concat(), None, Some(barrier)));
                 self.ast_parse(LazyOp::new(optype.clone(), vec![LazyOp::new(OpType::Buffer(ops::Buffer::Load), vec![], Some(vec![Arg::Buffer(self.kernel.bufs[self.kernel.bufs.len()-1].clone())])).into()], None), &mut acc, Some(&self.acc_offset(-1)), &loaded_buffers, true, Some(&loop_ctx), None);
@@ -985,8 +985,8 @@ impl Linearizer {
                         true,
                     );
                     self.load_cache.insert(key.clone(), tmp);
-                } else if this_const.is_some() {
-                    let tmp = self._const(this_const.unwrap().to_string(), localtype.clone(), None);
+                } else if let Some(_const) = this_const {
+                    let tmp = self._const(_const.to_string(), localtype.clone(), None);
                     self.load_cache.insert(key.clone(), tmp);
                     if valid.min().unwrap() == 0 && valid.max().unwrap() == 1 {
                         let valid_render = self.render(valid.clone());

@@ -29,6 +29,15 @@ pub enum ConstNum {
     Float(f32),
 }
 
+impl ConstNum {
+    pub fn is_zero(&self) -> bool {
+        match self {
+            ConstNum::Int(n) => *n == 0,
+            ConstNum::Float(n) => *n == 0.0,
+        }
+    }
+}
+
 impl std::fmt::Display for ConstNum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let n = match self {
@@ -298,7 +307,8 @@ impl Kernel {
         }
         let all_ones = v![if s==1 { 1 } else { 0 }, for s in self.full_shape()];
         let first_reduce = self.first_reduce();
-        self.local_dims -= sum(&all_ones[(first_reduce - self.local_dims) as usize..first_reduce as usize]);
+        self.local_dims -=
+            sum(&all_ones[(first_reduce - self.local_dims) as usize..first_reduce as usize]);
         self.upcasted -= sum(&all_ones[(self.shape_len() - self.upcasted) as usize..]);
         let ret = all_ones.iter().sum::<isize>() > 0;
         self.reshape_and_permute(
@@ -415,7 +425,7 @@ impl Kernel {
                     // assert not tensor cores
                     self.shift_to(axis, amt, None, Some(self.first_reduce()));
                 } else {
-                    self.shift_to(axis, amt, None, Some(self.first_reduce() + self.local_dims));
+                    self.shift_to(axis, amt, None, Some(self.first_reduce() - self.local_dims));
                 }
                 self.local_dims += 1;
             }
@@ -615,14 +625,14 @@ impl Kernel {
                 .is_some_and(|r| r.optype == Reduce::Sum)
             && self.full_shape().len() >= 2
             && self.opts.has_share
+            && self.reduceop.as_ref().is_some_and(|_r| {
+                let mulop = &_r.src[0];
+                mulop.optype() == Binary::Mul
+                    && mulop.src()[0].optype() == ops::Buffer::Load
+                    && mulop.src()[1].optype() == ops::Buffer::Load
+            })
         {
             let mulop = &self.reduceop.as_ref().unwrap().src[0];
-            if !(mulop.optype() == Binary::Mul
-                && mulop.src()[0].optype() == ops::Buffer::Load
-                && mulop.src()[1].optype() == ops::Buffer::Load)
-            {
-                return;
-            }
             fn has_expanded_axis(shape: &[isize], strides: &[Option<isize>]) -> bool {
                 v![*s >1 && st.is_some_and(|n| n==0), for (s, st) in izip!(shape, strides)]
                     .iter()
@@ -677,35 +687,33 @@ impl Kernel {
         }
 
         //TODO: OPENCL -54(CL_DEVICE_NOT_FOUND) error when using barrier
-        if DEVICE.name() != "OPENCL" {
-            if self.opts.has_local && self.opts.has_share {
-                if self.float4_axis(0).len() == 0
-                    && self.first_reduce() <= 2
-                    && self.first_reduce() + 1 <= self.shape_len()
-                    && prod(&self.sts[0].shape()[..self.first_reduce()]) <= 2048
-                {
-                    for sz in if prod(&self.sts[0].shape()[..self.first_reduce()]) <= 32 {
-                        vec![256, 16]
-                    } else {
-                        vec![16]
-                    } {
-                        if all(
-                            &v![st.shape()[self.first_reduce()] % sz == 0 || st.shape()[self.first_reduce()] == 1, for st in self.sts.iter()],
-                        ) {
-                            self.apply_opt(Opt {
-                                op: GROUPTOP,
-                                axis: Some(0),
-                                amt: Some(sz),
-                            });
-                            break;
-                        }
+        if self.opts.has_local && self.opts.has_share {
+            if self.float4_axis(0).len() == 0
+                && self.first_reduce() <= 2
+                && self.first_reduce() + 1 <= self.shape_len()
+                && prod(&self.sts[0].shape()[..self.first_reduce()]) <= 2048
+            {
+                for sz in if prod(&self.sts[0].shape()[..self.first_reduce()]) <= 32 {
+                    vec![256, 16]
+                } else {
+                    vec![16]
+                } {
+                    if all(
+                        &v![st.shape()[self.first_reduce()] % sz == 0 || st.shape()[self.first_reduce()] == 1, for st in self.sts.iter()],
+                    ) {
+                        self.apply_opt(Opt {
+                            op: GROUPTOP,
+                            axis: Some(0),
+                            amt: Some(sz),
+                        });
+                        break;
                     }
                 }
             }
+        }
 
-            if self.group_for_reduce.len() > 0 {
-                return;
-            }
+        if self.group_for_reduce.len() > 0 {
+            return;
         }
 
         let mut to_upcast: Vec<isize> = vec![];
@@ -771,9 +779,7 @@ impl Kernel {
         //(self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501
 
         if self.first_reduce() < (self.shape_len() - self.upcasted)
-            && (self.shape_offsets(self.full_buf_idx as isize).len() <= 4
-                || !any(&v![r.2 > 0, for r in self.upcasted_axis(self.full_buf_idx as isize)]))
-            && (self.upcasted == 0 || prod(&self.full_shape()[-self.upcasted..]) < 64)
+            && (self.shape_offsets(self.full_buf_idx as isize).len() <= 4 || !any(&v![r.2 > 0, for r in self.upcasted_axis(self.full_buf_idx as isize)])) && (self.upcasted == 0 || prod(&self.full_shape()[-self.upcasted..]) < 64)
         {
             let s1 = self.full_unupcasted_shape()[-1];
             if s1 <= 32isize {
@@ -826,45 +832,44 @@ impl Kernel {
             }
         }
 
-        // if self.opts.has_local {
-        //     if getenv("NOLOCALS", 0) == 1
-        //         && self.local_dims == 0
-        //         && self.group_for_reduce.is_empty()
-        //     {
-        //         self.apply_opt(Opt {
-        //             op: NOLOCALS,
-        //             axis: None,
-        //             amt: None,
-        //         })
-        //     } else {
-        //         //local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]  # noqa: E501
-        //         let local_axis_ranking = v![(if any(&v![self.sts[buf_index].views.last().as_ref().unwrap().strides[axis] == 0, for buf_index in 0..self.sts.len()]) { 1isize } else { 0isize }, axis as isize), for axis in 0..self.full_shape()[..self.first_reduce()].len()];
-        //         let mut sorted_local_axis_ranking = local_axis_ranking.clone();
-        //         sorted_local_axis_ranking.sort_by_cached_key(|x| (-x.0, -x.1));
-        //         let mut to_local: Vec<(isize, isize)> = vec![];
-        //         for (_, axis) in sorted_local_axis_ranking {
-        //             let local_size = prod(&v![*sz, for (_, sz) in to_local.iter()]);
-        //             //local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501
-        //             let local_sz = v![x, for x in vec![vec![32;if axis == 0isize { 1 } else { 0 }], vec![16, 8, 4, 3, 2]].concat(), if self.full_shape()[axis] % x == 0 && local_size * x <= 128];
-        //             if local_sz.len() > 0 {
-        //                 to_local.push((axis, local_sz[0]));
-        //             }
-        //         }
-        //         let mut deleted_shape = 0;
-        //         for (mut axis, local_sz) in to_local[..to_local.len().min(3)].iter().sorted() {
-        //             axis -= deleted_shape;
-        //             let will_deleted_shape = *local_sz == self.full_shape()[axis];
-        //             println!("{} {}", axis, local_sz);
-        //             self.apply_opt(Opt {
-        //                 op: LOCAL,
-        //                 axis: Some(axis),
-        //                 amt: Some(*local_sz),
-        //             });
-        //             if will_deleted_shape {
-        //                 deleted_shape += 1;
-        //             }
-        //         }
-        //     }
-        // }
+        if self.opts.has_local {
+            if getenv("NOLOCALS", 0) == 1
+                && self.local_dims == 0
+                && self.group_for_reduce.is_empty()
+            {
+                self.apply_opt(Opt {
+                    op: NOLOCALS,
+                    axis: None,
+                    amt: None,
+                })
+            } else {
+                //local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]  # noqa: E501
+                let local_axis_ranking = v![(if any(&v![self.sts[buf_index].views.last().as_ref().unwrap().strides[axis] == 0, for buf_index in 0..self.sts.len()]) { 1isize } else { 0isize }, axis as isize), for axis in 0..self.full_shape()[..self.first_reduce()].len()];
+                let mut sorted_local_axis_ranking = local_axis_ranking.clone();
+                sorted_local_axis_ranking.sort_by_cached_key(|x| (-x.0, -x.1));
+                let mut to_local: Vec<(isize, isize)> = vec![];
+                for (_, axis) in sorted_local_axis_ranking {
+                    let local_size = prod(&v![*sz, for (_, sz) in to_local.iter()]);
+                    //local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501
+                    let local_sz = v![x, for x in vec![vec![32;if axis == 0isize { 1 } else { 0 }], vec![16, 8, 4, 3, 2]].concat(), if self.full_shape()[axis] % x == 0 && local_size * x <= 128];
+                    if local_sz.len() > 0 {
+                        to_local.push((axis, local_sz[0]));
+                    }
+                }
+                let mut deleted_shape = 0;
+                for (mut axis, local_sz) in to_local[..to_local.len().min(3)].iter().sorted() {
+                    axis -= deleted_shape;
+                    let will_deleted_shape = *local_sz == self.full_shape()[axis];
+                    self.apply_opt(Opt {
+                        op: LOCAL,
+                        axis: Some(axis),
+                        amt: Some(*local_sz),
+                    });
+                    if will_deleted_shape {
+                        deleted_shape += 1;
+                    }
+                }
+            }
+        }
     }
 }

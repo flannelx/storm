@@ -136,7 +136,7 @@ impl Tensor {
             self.dtype(),
             std::any::type_name::<T>().split("::").last().unwrap()
         );
-        let buffer = self.realize();
+        let buffer = self.contiguous().realize();
         let mut bytes = (*buffer.buffer.device_buffer)
             .as_ref()
             .expect("buffer not realized")
@@ -954,6 +954,9 @@ impl Tensor {
     }
 
     pub fn add(&self, rhs: &Self) -> Self {
+        if rhs.is_const() && rhs.get_const_val().unwrap().is_zero() {
+            return self.clone();
+        }
         let (a, b) = Tensor::_broadcast(&self, &rhs);
         Add {
             need_input_grad: [a.require_grad, b.require_grad],
@@ -963,6 +966,9 @@ impl Tensor {
     }
 
     pub fn sub(&self, rhs: &Self) -> Self {
+        if rhs.is_const() && rhs.get_const_val().unwrap().is_zero() {
+            return self.clone();
+        }
         let (a, b) = Tensor::_broadcast(&self, &rhs);
         Sub {
             need_input_grad: [a.require_grad, b.require_grad],
@@ -972,6 +978,9 @@ impl Tensor {
     }
 
     pub fn mul(&self, rhs: &Self) -> Self {
+        if rhs.is_const() && rhs.get_const_val().unwrap().is_one() {
+            return self.clone();
+        }
         let (a, b) = Tensor::_broadcast(&self, &rhs);
         Mul {
             need_input_grad: [a.require_grad, b.require_grad],
@@ -1358,7 +1367,7 @@ impl Tensor {
                 .iter()
                 .map(|&s| s as usize)
                 .collect::<Vec<usize>>(),
-            self.contiguous().to_vec(),
+            self.to_vec(),
         )
         .unwrap()
     }

@@ -679,8 +679,6 @@ lazy_static::lazy_static! {
 }
 
 pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
-    //TODO: Need to "copyin/out" here to avoid alloc data to new buf instead of bufs that are
-    //already allocated.
     let debug_cache = DEBUG.0.contains("CACHE");
     let debug_kernel = DEBUG.0.contains("KERNEL");
     let debug_sch = DEBUG.0.contains("SCH");
