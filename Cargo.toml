@@ -26,7 +26,11 @@ cudarc = "0.10.0"
 float-cmp = "0.9.0"
 image = "0.24.7"
 mnist = { git = "https://github.com/allen-dai/mnist" }
+open = "5.0.1"
+project-root = "0.2.2"
 regex = "1.10.3"
+reqwest = { version = "0.11.24", features = ["blocking"] }
 sdl2 = "0.36.0"
 serde_json = "1.0.113"
-show-image = "0.13.1"
+tokio = "1.36.0"
+trauma = "2.2.4"
