@@ -8,6 +8,7 @@ use opencl3::kernel::{ExecuteKernel, Kernel};
 use opencl3::memory::CL_MEM_READ_WRITE;
 use opencl3::types::{CL_BLOCKING, CL_NON_BLOCKING};
 
+use crate::codegen::linearizer::LinearizerOptions;
 use crate::prelude::*;
 use crate::renderer::cstyle::{LanguageOpts, Renderer};
 use crate::shape::symbolic::CStyle;
@@ -101,6 +102,10 @@ impl Program for CLProgram {
         extra: &[String],
     ) {
         unsafe {
+            let mut global_size = global_size.to_vec();
+            if let Some(l) = local_size {
+                global_size = v![(g*l), for (g, l) in global_size.iter().zip(l)];
+            }
             for (i, b) in bufs.into_iter().enumerate() {
                 self.kernel.set_arg(i as _, &b.ptr());
             }

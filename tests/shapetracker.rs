@@ -51,7 +51,7 @@ fn test_realstrides() {
     let mut st = ShapeTracker::new(
         &[16, 32, 4],
         Some(vec![
-            view!([2048], [1], 0, [(0, 512)]),
+            view!([2048], [1], 0, Some(vec![(0, 512)])),
             view!([16, 32, 4], [128, 4, 1]),
         ]),
     );
