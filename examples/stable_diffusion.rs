@@ -1475,7 +1475,6 @@ use show_image::{create_window, ImageInfo, ImageView};
 
 #[show_image::main]
 fn main() {
-    std::env::set_var("MERGE_VIEW", "0");
     let mut model = StableDiffusion::new();
     model.alphas_comprod = alpha_cumprod();
     load_text_model(model.cond_stage_model.as_mut().unwrap());

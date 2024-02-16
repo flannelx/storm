@@ -243,17 +243,12 @@ impl ShapeTracker {
     }
 
     pub fn reshape(&self, new_shape: &[isize]) -> Self {
-        let mut views = self.views.clone();
-        if getenv("MERGE_VIEW", 1) > 0 {
-            let new_view = self.views[self.views.len() - 1].reshape(new_shape);
-            if let Some(nv) = new_view {
-                views.pop();
-                views.push(nv);
-                return ShapeTracker { views };
-            }
+        if let Some(new_view) = self.views.last().as_ref().unwrap().reshape(new_shape) {
+            return ShapeTracker { views: vec![self.views[..self.views.len()-1].to_vec(), vec![new_view]].concat()};
         }
-        views.push(view!(new_shape));
-        ShapeTracker { views }
+        let mut ret = self.clone();
+        ret.views.push(view!(new_shape));
+        ret
     }
 
     pub fn permute(&self, axis: &[isize]) -> Self {

@@ -273,20 +273,13 @@ impl View {
         if !_break {
             strides.extend(vec![0; new_shape.len() - strides.len()]);
             strides.reverse();
-            let (mask, off_mask, extra) = _reshape_mask(self, new_shape);
-            let total_offset = if let Some(om) = off_mask {
-                v![off * s, for (off, s) in izip!(om, strides.iter())]
-                    .iter()
-                    .sum()
-            } else {
-                0
-            };
+            let (new_mask, extra) = _reshape_mask(self, new_shape);
             if !extra {
                 return Some(View::new(
                     new_shape,
                     Some(strides),
-                    Some(self.offset + total_offset),
-                    mask,
+                    Some(self.offset),
+                    new_mask,
                 ));
             }
         }
@@ -296,11 +289,7 @@ impl View {
     pub fn permute(&self, axis: &[isize]) -> Self {
         // return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None)  # noqa: E501
         let new_mask = if let Some(m) = &self.mask {
-            if axis.len() > m.len() {
-                None
-            } else {
-                Some(v![m[*a as usize], for a in axis])
-            }
+            Some(v![m[*a as usize], for a in axis])
         } else {
             None
         };
@@ -365,9 +354,9 @@ impl View {
 fn _reshape_mask(
     view: &View,
     new_shape: &[isize],
-) -> (Option<Vec<(isize, isize)>>, Option<Vec<isize>>, bool) {
+) -> (Option<Vec<(isize, isize)>>, bool) {
     if view.mask.is_none() {
-        return (view.mask.clone(), None, false);
+        return (view.mask.clone(), false);
     }
     let mask = view.mask.as_ref().unwrap();
     let mut new_mask = vec![];
@@ -398,13 +387,13 @@ fn _reshape_mask(
                     r_mask.next().unwrap_or(&(0, 1)).clone(),
                 );
                 if mask.1 - mask.0 < 1 {
-                    return (Some(vec![(0, 0); new_shape.len()]), None, false);
+                    return (Some(vec![(0, 0); new_shape.len()]), false);
                 }
             } else {
                 if ((l % next_stride != 0 || r % next_stride != 0)
                     && l / next_stride != (r - 1) / next_stride)
                 {
-                    return (view.mask.clone(), None, false);
+                    return (view.mask.clone(), true);
                 }
                 new_mask.push((
                     l % next_stride / current_stride,
@@ -413,18 +402,21 @@ fn _reshape_mask(
                 (current_stride, new_dim) = (next_stride, *r_new_shape.next().unwrap_or(&1));
             }
         } else {
-            // FIXME:
-            return (view.mask.clone(), None, true);
+            let next_mask = r_mask.next().unwrap_or(&(0, 1));
+            if mask != (0, old_dim) && next_mask.1 - next_mask.0 != 1 {
+                return (view.mask.clone(), true);
+            }
+            mask = (next_mask.0 * old_dim + l, (next_mask.1 - 1) * old_dim + r);
+            old_dim = old_dim * r_shape.next().unwrap_or(&1);
         }
     }
     for mask in r_mask {
         if mask != &(0, 1) {
-            return (Some(vec![(0, 0); new_shape.len()]), None, false);
+            return (Some(vec![(0, 0); new_shape.len()]), false);
         }
-    }
+    };
     (
         Some(new_mask.iter().map(|m| m.clone()).rev().collect()),
-        Some(offsets),
         false,
     )
 }
