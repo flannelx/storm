@@ -1363,11 +1363,11 @@ async fn main() {
     let vae_path = weights_dir.join("vae.safetensors");
     let tok_vocab = weights_dir.join("tokenizer_vocab.json");
     let tok_merges = weights_dir.join("tokenizer_merges.txt");
-    let text_model_path = weights_dir.join("text_model.txt");
+    let text_model_path = weights_dir.join("text_model.safetensors");
     let downloads = vec![
         (unet_path.to_str().unwrap().to_string(), "https://huggingface.co/CompVis/stable-diffusion-v1-4/resolve/main/unet/diffusion_pytorch_model.safetensors?download=true"),
         (vae_path.to_str().unwrap().to_string(), "https://huggingface.co/CompVis/stable-diffusion-v1-4/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"),
-        (text_model_path.to_str().unwrap().to_string(), "https://huggingface.co/CompVis/stable-diffusion-v1-4/resolve/main/text_encoder/pytorch_model.bin?download=true"),
+        (text_model_path.to_str().unwrap().to_string(), "https://huggingface.co/CompVis/stable-diffusion-v1-4/resolve/main/text_encoder/model.safetensors?download=true"),
         (tok_vocab.to_str().unwrap().to_string(), "https://huggingface.co/CompVis/stable-diffusion-v1-4/resolve/main/tokenizer/vocab.json?download=true"),
         (tok_merges.to_str().unwrap().to_string(), "https://huggingface.co/CompVis/stable-diffusion-v1-4/resolve/main/tokenizer/merges.txt?download=true"),
     ];
