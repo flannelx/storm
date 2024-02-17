@@ -1355,7 +1355,7 @@ use reqwest::Url;
 async fn main() {
     // create dirs for weights
     let root = project_root::get_project_root().unwrap();
-    let weights_dir = root.join("stable_diffusion_weights");
+    let weights_dir = root.join("weights/stable_diffusion_weights");
     std::fs::create_dir(weights_dir.clone());
 
     // Downloads
