@@ -1,4 +1,8 @@
+use std::{ops::RangeBounds, sync::Arc};
+
 use crate::prelude::*;
+
+use self::dtype::NumType;
 
 impl core::fmt::Debug for Tensor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -165,5 +169,149 @@ impl From<f32> for Tensor {
 impl From<isize> for Tensor {
     fn from(value: isize) -> Self {
         Self::_const(value)
+    }
+}
+
+unsafe impl Send for Tensor {}
+unsafe impl Sync for Tensor {}
+
+lazy_static::lazy_static! {
+    pub static ref Tensors: Arc<Vec<Tensor>> = Default::default();
+}
+
+impl<N: NumType> std::ops::Index<N> for Tensor {
+    type Output = Self;
+
+    fn index(&self, index: N) -> &Self::Output {
+        let mut index = index.to_isize().unwrap();
+        if index < 0 {
+            index = self.shape().len() as isize + index;
+        };
+        let index = index as usize;
+        assert!(index < self.shape()[0] as usize);
+        let mut slc = v![(0, *s as usize), for (i, s) in self.shape().dims.iter().enumerate()];
+        slc[0] = (index, index+1);
+        let mut new_tenor = self.shrink(slc);
+        if self.shape().len() > 1 {
+            let mut new_shape = self.shape().dims.clone();
+            new_shape.remove(index);
+            new_tenor = new_tenor.reshape(new_shape);
+        }
+        unsafe {
+            let mut tensors = Tensors.clone();
+            Arc::get_mut_unchecked(&mut tensors).push(new_tenor);
+        }
+        Tensors.last().as_ref().unwrap()
+    }
+}
+
+impl<N: NumType> std::ops::Index<std::ops::Range<N>> for Tensor {
+    type Output = Self;
+    fn index(&self, range: std::ops::Range<N>) -> &Self::Output {
+        let mut s = range.start.to_isize().unwrap();
+        if s < 0 {
+            s += self.shape().dims[0];
+        }
+        let mut e = range.end.to_isize().unwrap();
+        if e < 0 {
+            e += self.shape().dims[0];
+        }
+        match range.end_bound() {
+            std::ops::Bound::Included(_) => e += 1,
+            std::ops::Bound::Unbounded => e = self.shape().dims[0],
+            _ => (),
+        };
+        let mut slc = v![(0, *s as usize), for (i, s) in self.shape().dims.iter().enumerate()];
+        slc[0] = (s as usize, e as usize);
+        let mut new_tenor = self.shrink(slc);
+        unsafe {
+            let mut tensors = Tensors.clone();
+            Arc::get_mut_unchecked(&mut tensors).push(new_tenor);
+        }
+        Tensors.last().as_ref().unwrap()
+    }
+}
+
+impl<N: NumType> std::ops::Index<std::ops::RangeTo<N>> for Tensor {
+    type Output = Self;
+    fn index(&self, range: std::ops::RangeTo<N>) -> &Self::Output {
+        let mut s = match range.start_bound() {
+            std::ops::Bound::Included(n) | std::ops::Bound::Excluded(n) => n.to_isize().unwrap(),
+            std::ops::Bound::Unbounded => 0,
+        };
+        if s < 0 {
+            s += self.shape().dims[0];
+        }
+        if matches!(range.start_bound(), std::ops::Bound::Excluded(_)) {
+            s += 1;
+        }
+        let mut e = match range.end_bound() {
+            std::ops::Bound::Included(n) | std::ops::Bound::Excluded(n) => n.to_isize().unwrap(),
+            std::ops::Bound::Unbounded => self.shape().dims[0],
+        };
+        if e < 0 {
+            e += self.shape().dims[0];
+        }
+        if matches!(range.start_bound(), std::ops::Bound::Included(_)) {
+            e += 1;
+        }
+        let mut slc = v![(0, *s as usize), for (i, s) in self.shape().dims.iter().enumerate()];
+        slc[0] = (s as usize, e as usize);
+        let mut new_tenor = self.shrink(slc);
+        unsafe {
+            let mut tensors = Tensors.clone();
+            Arc::get_mut_unchecked(&mut tensors).push(new_tenor);
+        }
+        Tensors.last().as_ref().unwrap()
+    }
+}
+
+impl<N: NumType> std::ops::Index<std::ops::RangeInclusive<N>> for Tensor {
+    type Output = Self;
+    fn index(&self, range: std::ops::RangeInclusive<N>) -> &Self::Output {
+        let mut s = match range.start_bound() {
+            std::ops::Bound::Included(n) | std::ops::Bound::Excluded(n) => n.to_isize().unwrap(),
+            std::ops::Bound::Unbounded => 0,
+        };
+        if s < 0 {
+            s += self.shape().dims[0];
+        }
+        if matches!(range.start_bound(), std::ops::Bound::Excluded(_)) {
+            s += 1;
+        }
+        let mut e = match range.end_bound() {
+            std::ops::Bound::Included(n) | std::ops::Bound::Excluded(n) => n.to_isize().unwrap(),
+            std::ops::Bound::Unbounded => self.shape().dims[0],
+        };
+        if e < 0 {
+            e += self.shape().dims[0];
+        }
+        if matches!(range.start_bound(), std::ops::Bound::Included(_)) {
+            e += 1;
+        }
+        let mut slc = v![(0, *s as usize), for (i, s) in self.shape().dims.iter().enumerate()];
+        slc[0] = (s as usize, e as usize);
+        let mut new_tenor = self.shrink(slc);
+        unsafe {
+            let mut tensors = Tensors.clone();
+            Arc::get_mut_unchecked(&mut tensors).push(new_tenor);
+        }
+        Tensors.last().as_ref().unwrap()
+    }
+}
+
+impl std::ops::Index<std::ops::RangeFull> for Tensor {
+    type Output = Self;
+    fn index(&self, range: std::ops::RangeFull) -> &Self::Output {
+        let s = 0;
+        let e = self.shape().dims[0];
+        let mut slc = v![(0, *s as usize), for (i, s) in self.shape().dims.iter().enumerate()];
+        slc[0] = (s as usize, e as usize);
+        let mut new_tenor = self.shrink(slc);
+        unsafe {
+            let mut tensors = Tensors.clone();
+            Arc::get_mut_unchecked(&mut tensors).push(new_tenor);
+        }
+        Tensors.last().as_ref().unwrap()
     }
 }

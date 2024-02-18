@@ -102,9 +102,7 @@ impl Tensor {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         let mut buffer = LazyBuffer::from_bytes(bytes);
         let dtype = type_to_dtype::<TensorDefaultType>();
-        buffer.st = ShapeTracker::from_shape(&[(bytes.len()
-            / dtype.size)
-            as isize]);
+        buffer.st = ShapeTracker::from_shape(&[(bytes.len() / dtype.size) as isize]);
         buffer.shape = buffer.st.shape_vec();
         buffer.dtype = dtype;
         Self {
@@ -1318,7 +1316,9 @@ impl Tensor {
         if is_causal {
             attn_mask = Some(Tensor::ones([self.shape()[-2], key.shape()[-2]]).tril(Some(0)))
         }
-        if let Some(am) = attn_mask.as_mut() && am.dtype == _bool {
+        if let Some(am) = attn_mask.as_mut()
+            && am.dtype == _bool
+        {
             *am = am._eq(&Tensor::_const(0.0))._where(f32::NEG_INFINITY, 0.0);
         }
         let qk = self.matmul(&key.transpose(-2, -1)) / (self.shape()[-1] as f32).sqrt();

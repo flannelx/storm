@@ -86,9 +86,7 @@ impl ShapeTracker {
             }
             .simplify();
         }
-        if ret.shape().dims.contains(&0) {
-            panic!();
-        }
+        assert!(!ret.shape().dims.contains(&0));
         ret
     }
 
