@@ -124,6 +124,22 @@ impl Tensor {
         ContiguousBackward::default().apply(self, None, None, None, None)
     }
 
+    pub fn to_vec_t<T: NumType>(&self) -> Vec<T> {
+        let buffer = self.contiguous().realize();
+        let mut bytes = (*buffer.buffer.device_buffer)
+            .as_ref()
+            .expect("buffer not realized")
+            .to_cpu();
+        let mut ret = vec![];
+        for b in bytes
+            .windows(std::mem::size_of::<T>())
+            .step_by(std::mem::size_of::<T>())
+        {
+            ret.push(T::from_le_bytes(b.try_into().unwrap()))
+        }
+        ret
+    }
+
     // TODO: This is probably stuck with generic param.
     //      Or have three verions of this. 1. T, 2. String, 3. Raw bytes
     pub fn to_vec(&self) -> Vec<TensorDefaultType> {
@@ -1372,6 +1388,18 @@ impl Tensor {
         .unwrap()
     }
 
+    pub fn nd_t<T: NumType>(&self) -> ArrayD<T> {
+        ArrayD::from_shape_vec(
+            self.shape()
+                .dims
+                .iter()
+                .map(|&s| s as usize)
+                .collect::<Vec<usize>>(),
+            self.to_vec_t::<T>(),
+        )
+        .unwrap()
+    }
+
     pub fn index<I: Into<IndexRange>, V: Into<Vec<I>>>(&self, idxs: V) -> Tensor {
         todo!()
     }
@@ -1444,6 +1472,12 @@ impl Tensor {
             acc = acc + t.pad(p.clone(), 0);
         }
         acc
+    }
+
+    pub fn cast(&self, dtype:Dtype) -> Self {
+        let mut ret = self.clone();
+        ret.buffer = self.buffer.cast(dtype, None);
+        ret
     }
 }
 

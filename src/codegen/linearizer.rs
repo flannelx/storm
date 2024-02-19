@@ -1163,6 +1163,13 @@ impl Linearizer {
                     _ => (),
                 }
             }
+            OpType::Unary(Unary::Cast) => {
+                let Arg::Dtype(ref to_dtype) = x.args[0] else {
+                    panic!("Cast op lazyop arg[0] should be a dtype")
+                };
+                //return [self.uop(UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg) for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
+                return v![self.uop_default(UOps::CAST, Some(to_dtype.clone()), vec![u], x.args.clone()), for u in self.ast_parse(x.src[0].lo().clone(), acc, offs, loaded_buffers, do_reduce, loop_ctx, None)];
+            }
             _ => (),
         }
         let values = v![self.ast_parse(v.lo().clone(), acc, offs, loaded_buffers, do_reduce, loop_ctx, Some(cache)), for v in x.src.iter()];

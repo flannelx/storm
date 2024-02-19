@@ -9,7 +9,7 @@ use cudarc::driver::{CudaFunction, DevicePtrMut};
 use cudarc::nvrtc::{compile_ptx, compile_ptx_with_opts, CompileOptions};
 
 use super::{Buffer, Device, Program};
-use crate::codegen::linearizer::LinearizerOptions;
+use crate::codegen::linearizer::{LinearizerOptions, UOp};
 use crate::prelude::*;
 use crate::renderer::cstyle::{LanguageOpts, Renderer};
 use crate::shape::symbolic::CStyle;
@@ -27,33 +27,38 @@ impl Default for CudaRenderer {
     fn default() -> Self {
         Self {
             opts: Arc::new(LanguageOpts {
-                kernel_prefix: "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ ".into(),
+                kernel_prefix: "extern \"C\" __global__ ".into(),
                 smem_prefix: "__shared__ ".into(),
                 arg_int_prefix: "const int".into(),
                 half_prekernel: Some("#include <cuda_fp16.h>".into()),
                 barrier: "__syncthreads();".into(),
                 float4: Some("make_float4".into()),
                 code_for_workitem: HashMap::from([
-                    ("g".into(), (0..3).map(|i| {
-                        format!(
-                            "blockIdx.{}",
-                            (120u8 + i) as char,
-                        )
-                    }).collect()),
-                    ("l".into(), (0..3).map(|i| {
-                        format!(
-                            "threadIdx.{}",
-                            (120u8 + i) as char,
-                        )
-                    }).collect()),
-                    ("i".into(), (0..3).map(|i| {
-                        format!(
-                            "(blockIdx.{}*blockDim.{}+threadIdx.{})",
-                            (120u8 + i) as char,
-                            (120u8 + i) as char,
-                            (120u8 + i) as char,
-                        )
-                    }).collect()),
+                    (
+                        "g".into(),
+                        (0..3)
+                            .map(|i| format!("blockIdx.{}", (120u8 + i) as char,))
+                            .collect(),
+                    ),
+                    (
+                        "l".into(),
+                        (0..3)
+                            .map(|i| format!("threadIdx.{}", (120u8 + i) as char,))
+                            .collect(),
+                    ),
+                    (
+                        "i".into(),
+                        (0..3)
+                            .map(|i| {
+                                format!(
+                                    "(blockIdx.{}*blockDim.{}+threadIdx.{})",
+                                    (120u8 + i) as char,
+                                    (120u8 + i) as char,
+                                    (120u8 + i) as char,
+                                )
+                            })
+                            .collect(),
+                    ),
                 ]),
                 uses_vload: true,
                 global_max: vec![65535, 65535, 2147483647],
@@ -69,6 +74,93 @@ impl crate::ops::Op for CudaRenderer {}
 impl Renderer for CudaRenderer {
     fn lang_opts(&self) -> Arc<LanguageOpts> {
         self.opts.clone()
+    }
+
+    fn render_kernel(
+        &self,
+        function_name: &str,
+        kernel: &[String],
+        bufs: &[(String, dtype::Dtype)],
+        local_size: &[usize],
+        uops: &[UOp],
+        prekernel: &[String],
+    ) -> String {
+        // Cuda stuff
+        let mut prekernel = vec![
+            "#define INFINITY (__int_as_float(0x7f800000))",
+            "#define NAN (__int_as_float(0x7fffffff))",
+        ];
+        if any(&v![u.dtype.as_ref().is_some_and(|d| *d == half), for u in uops]) {
+            prekernel.extend(["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };",
+      "__device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }"]);
+        }
+        if any(&v![u.dtype.as_ref().is_some_and(|d| *d == bfloat16), for u in uops]) {
+            prekernel.push("#include <cuda_fp16.h>")
+        }
+
+        // Default impl below
+        let tmp = if bufs.iter().any(|(_, dt)| dt.shape.is_some()) {
+            "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
+        } else {
+            ""
+        };
+        let mut buftypes = vec![];
+        for (i, (name, dtype)) in bufs.iter().enumerate() {
+            let s = if dtype.type_name.starts_with("image") {
+                format!(
+                    "{} image2d_t",
+                    if 1 > 0 { "read_only" } else { "write_only" }
+                )
+            } else {
+                if dtype == &dtype::_arg_int32 {
+                    self.lang_opts().arg_int_prefix.to_string()
+                } else {
+                    (if i > 0 {
+                        "const ".to_string()
+                    } else {
+                        "".to_string()
+                    }) + &self.lang_opts().buffer_prefix
+                        + dtype.c_name
+                        + "*"
+                        + &self.lang_opts().buffer_suffix
+                }
+            };
+            buftypes.push((name, s));
+        }
+
+        let prod_local_size = local_size.iter().product::<usize>();
+        let mut prg = {
+            format!(
+                "{}void {}{function_name}(",
+                self.lang_opts().kernel_prefix,
+                if self.lang_opts().launch_bounds {
+                    format!("__launch_bounds__ ({prod_local_size}, 1)")
+                } else {
+                    "".to_string()
+                }
+            )
+        };
+
+        let mut args = buftypes
+            .iter()
+            .map(|(name, t)| format!("{t} {name}"))
+            .collect::<Vec<String>>();
+        args.extend(self.lang_opts().extra_args.clone());
+        prg += &args.join(", ");
+
+        prg += &format!("{}{}{}{}", ") {\n", tmp, kernel.join("\n"), "\n}");
+
+        if self.lang_opts().half_prekernel.is_some()
+            && bufs.iter().any(|(_, dtype)| *dtype == dtype::float16)
+        {
+            prg = self.lang_opts().half_prekernel.as_ref().unwrap().clone() + "\n" + &prg;
+        }
+
+        if prekernel.len() > 0 {
+            format!("{}\n{}", prekernel.join("\n"), prg)
+        } else {
+            prg
+        }
     }
 }
 
@@ -165,13 +257,14 @@ impl Device for CudaDevice {
 
     fn build(&self, name: &str, program: &str) -> Arc<dyn Program> {
         unsafe {
+            //let ptx = cudarc::nvrtc::compile_ptx(program).unwrap();
             let ptx = cudarc::nvrtc::compile_ptx_with_opts(
                 program,
                 CompileOptions {
                     include_paths: vec![
-                        "-I/usr/local/cuda/include".into(),
-                        "-I/usr/include".into(),
-                        "-I/opt/cuda/include/".into(),
+                        "/usr/local/cuda/include".into(),
+                        "/usr/include".into(),
+                        "/opt/cuda/include/".into(),
                     ],
                     arch: Some(self.arch),
                     ..Default::default()
@@ -272,7 +365,14 @@ impl Program for CudaProgram {
                 null_mut(),
             );
             //println!("{:?}\nbuffers: {:?}\nglobal:{:?}\nlocal:{:?}", r, args, global_size, local_size);
-            assert!(r == cudaError_enum::CUDA_SUCCESS, "{:?}\nbuffers: {:?}\nglobal:{:?}\nlocal:{:?}", r, args, global_size, local_size);
+            assert!(
+                r == cudaError_enum::CUDA_SUCCESS,
+                "{:?}\nbuffers: {:?}\nglobal:{:?}\nlocal:{:?}",
+                r,
+                args,
+                global_size,
+                local_size
+            );
         }
     }
 }

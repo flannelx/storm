@@ -31,6 +31,7 @@ pub struct LanguageOpts {
     pub uses_ptr_arithmetic: bool,
     pub launch_bounds: bool,
     pub code_for_workitem: HashMap<&'static str,Vec<String>>,
+    pub type_map: HashMap<String, String>
 }
 
 impl Default for LanguageOpts {
@@ -55,6 +56,7 @@ impl Default for LanguageOpts {
             uses_ptr_arithmetic: Default::default(),
             launch_bounds: Default::default(),
             code_for_workitem: Default::default(),
+            type_map: Default::default(),
         }
     }
 }
@@ -67,6 +69,9 @@ pub trait Renderer: 'static + Send + Sync + Op {
     fn render_cast(&self, x: &[&str], var_dtype: dtype::Dtype) -> String {
         assert!(x.len() == var_dtype.sz);
         assert!(self.lang_opts().float4.is_some());
+        if x.len() == 1 {
+            return format!("({})({})", var_dtype.c_name, x[0]);
+        }
         if var_dtype == dtype::_float4 {
             return format!(
                 "{}({})",
@@ -194,7 +199,8 @@ pub trait Renderer: 'static + Send + Sync + Op {
         kernel: &[String],
         bufs: &[(String, dtype::Dtype)],
         local_size: &[usize],
-        _prekernel: &[String],
+        uops: &[UOp],
+        prekernel: &[String],
     ) -> String {
         let tmp = if bufs.iter().any(|(_, dt)| dt.shape.is_some()) {
             "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
@@ -253,7 +259,11 @@ pub trait Renderer: 'static + Send + Sync + Op {
             prg = self.lang_opts().half_prekernel.as_ref().unwrap().clone() + "\n" + &prg;
         }
 
-        prg
+        if prekernel.len() > 0 {
+            format!("{}\n{}", prekernel.join("\n"), prg)
+        } else {
+            prg
+        }
     }
 
     fn render_store(
@@ -570,7 +580,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                 }
             }
             UOps::CAST => {
-                assert!(dtype.is_some() && dtype.as_ref().unwrap().sz > 1);
+                assert!(dtype.is_some() && dtype.as_ref().unwrap().size > 1);
                 let val = lang.render_cast(
                     &vin.iter().map(|x| r[x].as_str()).collect::<Vec<&str>>(),
                     dtype.as_ref().unwrap().clone(),
@@ -650,7 +660,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
             },
         }
     }
-    lang.render_kernel(function_name, &kernel, &bufs, &local_size, &prekernel)
+    lang.render_kernel(function_name, &kernel, &bufs, &local_size, uops, &prekernel)
 }
 
 fn strip_parens(_s: &str) -> String {

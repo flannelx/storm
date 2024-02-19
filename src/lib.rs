@@ -33,5 +33,6 @@ pub mod prelude {
     pub use crate::tensor::{Tensor, TensorDefaultType};
     pub use crate::DEBUG;
     pub use crate::utils::*;
+    pub use dtype::*;
     pub use num_traits::{AsPrimitive, Bounded, Float, FromPrimitive, Num, ToPrimitive, NumOps};
 }

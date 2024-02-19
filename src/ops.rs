@@ -84,6 +84,7 @@ pub trait Op: 'static + core::fmt::Debug + Send + Sync {
                     Unary::Sin => self.sin(&args[0]),
                     Unary::Sqrt => self.sqrt(&args[0]),
                     Unary::Noop => String::new(),
+                    Unary::Cast => todo!(),
                 }
             }
             OpType::Binary(bop) => {
@@ -125,6 +126,7 @@ pub enum Unary {
     Sin,
     Sqrt,
     Noop,
+    Cast,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

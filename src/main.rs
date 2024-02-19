@@ -1,3 +1,4 @@
+use half::{bf16, f16};
 use ndarray::ArrayD;
 use storm::{
     nn::{Conv2d, GroupNorm},
@@ -6,7 +7,6 @@ use storm::{
 };
 
 fn main() {
-    let mut a = Tensor::arange(27.).reshape([3,3,3]);
-    println!("{}", a[0..2].shape());
-    println!("{}", a[0..2].nd());
+    let mut a = Tensor::arange(10.).cast(float16);
+    println!("{}", a.nd_t::<f16>());
 }

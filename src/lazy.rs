@@ -339,7 +339,10 @@ impl LazyBuffer {
         let optype = optype.into();
         let mut srcs: Vec<LazyBuffer> = vec![];
         for &s in vec![vec![self], in_srcs.iter().collect()].concat().iter() {
-            if s == s.base_ref() && s.base_ref().contiguous_child.is_some() && let Some(root) = s.base_ref().contiguous_child.as_ref() {
+            if s == s.base_ref()
+                && s.base_ref().contiguous_child.is_some()
+                && let Some(root) = s.base_ref().contiguous_child.as_ref()
+            {
                 srcs.push(root.0._view(Movement::Reshape, root.1.clone()));
             } else {
                 srcs.push(s.clone());
@@ -396,6 +399,30 @@ impl LazyBuffer {
     pub fn r<O: Into<OpType>>(&self, optype: O, new_shape: &[isize]) -> Self {
         let optype = optype.into();
         self._reduce_op(optype, new_shape)
+    }
+
+    pub fn cast(&self, dtype: Dtype, bitcast: Option<bool>) -> Self {
+        if dtype.size == self.dtype.size {
+            return self.clone();
+        }
+        if dtype.size <= self.dtype.size && self != self.base_ref() {
+            return self
+                .base_ref()
+                .cast(dtype, bitcast)
+                ._view(Movement::Reshape, self.st.clone());
+        }
+        let bitcast = bitcast.unwrap_or(false);
+        create_lazybuffer(
+            &self.device.clone(),
+            ShapeTracker::from_shape(&self.shape),
+            LazyOp::new(
+                ops::Unary::Cast.into(),
+                vec![self.clone().into()],
+                Some(vec![Arg::Dtype(dtype.clone())]),
+            ),
+            dtype,
+            None,
+        )
     }
 
     pub fn reshape(&self, arg: &[isize]) -> Self {

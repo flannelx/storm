@@ -7,6 +7,7 @@ use crate::{
 #[derive(Clone, Debug, Hash, Eq)]
 pub enum Arg {
     Str(String),
+    Dtype(Dtype),
     OpType(OpType),
     Op(LazyOp),
     Buffer(Buffers),
@@ -65,6 +66,7 @@ impl PartialEq for Arg {
             (Arg::Shape(a), Arg::Shape(b)) => a == b,
             (Arg::Str(a), Arg::Idx(b)) => a.parse::<isize>().is_ok_and(|n| n == *b),
             (Arg::Idx(a), Arg::Str(b)) => b.parse::<isize>().is_ok_and(|n| n == *a),
+            (Arg::Dtype(a), Arg::Dtype(b)) => a == b,
             (a, b) => {
                 println!("ARG Compare: {a:?} != {b:?} ??");
                 false
