@@ -6,7 +6,7 @@ use cudarc::driver::sys::{
 };
 use cudarc::driver::sys::{cuMemFree_v2, cuMemcpyDtoH_v2, cuMemcpyHtoD_v2, CUdevice, CUdeviceptr};
 use cudarc::driver::{CudaFunction, DevicePtrMut};
-use cudarc::nvrtc::{compile_ptx, compile_ptx_with_opts, CompileOptions};
+use cudarc::nvrtc::{compile_ptx, compile_ptx_with_opts, CompileError, CompileOptions};
 
 use super::{Buffer, Device, Program};
 use crate::codegen::linearizer::{LinearizerOptions, UOp};
@@ -269,8 +269,15 @@ impl Device for CudaDevice {
                     arch: Some(self.arch),
                     ..Default::default()
                 },
-            )
-            .unwrap();
+            );
+            if ptx.is_err() {
+                let e = ptx.clone().unwrap_err();
+                match e {
+                    CompileError::CompileError { nvrtc, options, log } => panic!("{}", log.to_str().unwrap()),
+                    _ => panic!("{e:?}"),
+                }
+            }
+            let ptx = ptx.unwrap();
             let mut module: cudarc::driver::sys::CUmodule = std::ptr::null_mut();
             let cstring = CString::new(ptx.to_src()).unwrap();
             let r =
