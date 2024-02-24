@@ -493,9 +493,9 @@ impl Upsample {
 }
 
 pub fn timestep_embedding(timesteps: &Tensor, dim: usize, max_period: Option<usize>) -> Tensor {
-    let half = dim as f32 / 2.;
+    let half_dim = dim as f32 / 2.;
     let max_period = max_period.unwrap_or(10000);
-    let freqs = (-(max_period as f32).ln() * Tensor::arange(half) / half).exp();
+    let freqs = (-(max_period as f32).ln() * Tensor::arange(half_dim) / half_dim).exp();
     let args = timesteps * &freqs;
     Tensor::cat(&args.cos(), &[args.sin()], None).reshape([1, -1])
 }
