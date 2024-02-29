@@ -17,6 +17,7 @@ ndarray = "0.15.6"
 num-traits = "0.2.17"
 rand = "0.8.5"
 safetensors = "0.4.2"
+wgpu = "=0.18"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 opencl3 = "0.9.4"
