@@ -14,8 +14,9 @@ use crate::{
 
 lazy_static::lazy_static! {
     pub static ref DEVICES: Vec<fn() -> anyhow::Result<Arc<dyn Device>>> = vec![
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
         cuda::CudaDevice::new,
+        #[cfg(not(any(target_arch = "wasm32")))]
         opencl::CLDevice::new,
     ];
 }
@@ -23,8 +24,9 @@ lazy_static::lazy_static! {
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = {
         match getenv::<String>("DEVICE", "".into()).to_uppercase().as_str() {
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
             "CUDA" => cuda::CudaDevice::new().unwrap(),
+            #[cfg(not(any(target_arch = "wasm32")))]
             "OPENCL" => opencl::CLDevice::new().unwrap(),
             _ =>  {
                 let mut d = vec![];
@@ -50,7 +52,6 @@ pub mod cuda;
 pub mod opencl;
 
 pub mod prelude {
-    pub use super::opencl::{CLBuffer, CLDevice, CLProgram};
     pub use super::{ALLOCTOR, DEVICE};
 }
 

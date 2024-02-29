@@ -1724,6 +1724,7 @@ dependencies = [
  "cudarc",
  "dyn-clone",
  "float-cmp",
+ "getrandom",
  "half",
  "image",
  "itertools",
