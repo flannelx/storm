@@ -199,9 +199,7 @@ impl Buffer for CudaBuffer {
 
 impl Drop for CudaBuffer {
     fn drop(&mut self) {
-        unsafe {
-            cuMemFree_v2(self.ptr);
-        }
+        ALLOCTOR.0.free(&*self);
     }
 }
 
