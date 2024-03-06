@@ -640,13 +640,11 @@ impl Linearizer {
             if u.uop == UOps::LOOP {
                 let uops_idxs: HashMap<&UOp, usize> =
                     HashMap::from_iter(v![(u, i), for (i, u) in self.uops.iter().enumerate()]);
-                let mut inb = uops_idxs[self
-                    .get_recursive_children(&u)
-                    .iter()
-                    .sorted_by_cached_key(|x| uops_idxs[**x])
-                    .last()
-                    .unwrap()]
-                    + 1;
+                let mut inb = 0;
+                for u in self.get_recursive_children(&u) {
+                    inb = inb.max(uops_idxs[u])
+                }
+                inb += 1;
                 self.uop(
                     UOps::END,
                     None,
