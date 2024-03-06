@@ -79,10 +79,10 @@ impl Tensor {
 
     pub fn from<E: dtype::NumType, V: Into<Vec<E>>>(data: V) -> Self {
         let data = data
-            .into()
-            .into_iter()
-            .map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap())
-            .collect::<Vec<TensorDefaultType>>();
+            .into();
+            // .into_iter()
+            // .map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap())
+            // .collect::<Vec<TensorDefaultType>>();
         let buffer = if data.len() == 1 {
             LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>(), "GPU")
         } else {
@@ -205,7 +205,7 @@ impl Tensor {
         Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None, None)
     }
 
-    pub fn _const(value: impl Display) -> Self {
+    pub fn _const<N: NumType>(value: N) -> Self {
         let dtype = crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>());
         Self::from_buf(LazyBuffer::_const(value, dtype, "GPU"))
     }
@@ -465,11 +465,23 @@ impl Tensor {
     }
 
     pub fn sum<S: Into<Vec<isize>>>(&self, axis: S, keepdim: bool) -> Self {
+        let acc_dtype = if self.dtype.is_unsigned() {
+            least_upper_dtype(&[self.dtype.clone(), uint32])
+        } else if self.dtype.is_int() || self.dtype == _bool {
+            least_upper_dtype(&[self.dtype.clone(), int32])
+        }else {
+            least_upper_dtype(&[self.dtype.clone(), float32])
+        };
         let mut axis = axis.into();
         if axis.len() == 0 {
             axis = (0..self.shape().len() as isize).collect::<Vec<isize>>();
         }
-        self._reduce(Sum::default(), axis, keepdim)
+        let out_dtype = if matches!(self.dtype, float16 | bfloat16) {
+            self.dtype.clone()
+        } else {
+            acc_dtype.clone()
+        };
+        self.cast(acc_dtype)._reduce(Sum::default(), axis, keepdim).cast(out_dtype)
     }
 
     pub fn _reduce<F: 'static + Function>(
@@ -589,7 +601,8 @@ impl Tensor {
                 .concat(),
             )
             .transpose(-1, -(n2.min(2) as isize));
-        (x * w).sum([-1], false)
+        let upper_type = least_upper_dtype(&[x.dtype.clone(), w.dtype.clone()]);
+        (x * w).sum([-1], false).cast(upper_type)
     }
 
     pub fn _broadcast_r(x: &Self, y: &Self) -> (Self, Self) {
@@ -1045,13 +1058,13 @@ impl Tensor {
         // self.clone()
     }
 
-    pub fn arange(to: f32) -> Self {
-        Self::_arange(0., to, 1.)
+    pub fn arange<N: NumType>(to: N) -> Self {
+        Self::_arange(N::zero(), to, N::one())
     }
 
-    pub fn _arange(start: f32, stop: f32, step: f32) -> Self {
-        let s = ((stop - start) / step).ceil() as isize;
-        Self::_const(step).expand([s]).cumsum() + (start - step)
+    pub fn _arange<N: NumType>(start: N, stop: N, step: N) -> Self {
+        let s = ((stop - start).to_f64().unwrap() / step.to_f64().unwrap()).ceil() as isize;
+        Self::_const(step).expand([s]).cumsum() + Tensor::from(&[(start - step)])
     }
 
     pub fn full<S: Into<Vec<isize>>>(shape: S, const_: impl NumType) -> Self {

@@ -1,6 +1,7 @@
 use itertools::Itertools;
 
 use crate::dtype::{_bool, float16, float32, int32};
+use crate::lazy::get_lazyop_info;
 use crate::shape::shapetracker::strides_for_shape;
 use crate::{ops, prelude::*};
 use std::collections::{HashMap, HashSet};
@@ -777,7 +778,6 @@ impl Linearizer {
                         && vin[1].uop == UOps::ALU
                         && vin[1].args[0].to_op() == Unary::Neg
                     {
-                        //return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable, insert_before=insert_before)
                         return self.uop(
                             UOps::ALU,
                             dtype,
@@ -888,7 +888,11 @@ impl Linearizer {
         } as usize;
         let buf = &self.kernel.bufs[buf_i];
         let buf_string = format!("{:?}", buf);
-        let localtype = buf.dtype();
+        let localtype = if acc.is_none() {
+            buf.dtype()
+        } else {
+            get_lazyop_info(&self.kernel.reduceop.clone().unwrap().into()).dtype
+        };
         let const_ = if let Buffers::ConstBuffer(acc) = buf {
             if localtype.is_int() {
                 Some(ConstNum::Int(acc.val.parse::<i128>().unwrap()))

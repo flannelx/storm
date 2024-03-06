@@ -62,7 +62,7 @@ pub trait Op: 'static + core::fmt::Debug + Send + Sync {
     }
 
     fn _where(&self, a: &str, b: &str, c: &str) -> String {
-        format!("((bool)({a})?{b}:{c})")
+        format!("({a}?{b}:{c})")
     }
 
     // Reduce

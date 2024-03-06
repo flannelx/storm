@@ -369,6 +369,11 @@ impl LazyBuffer {
                 //}
             })
             .collect();
+        // let out_dtype = if optype != ops::Binary::Cmplt {
+        //     srcs.last().unwrap().lb().dtype.clone()
+        // } else {
+        //     _bool
+        // };
         create_lazybuffer(
             &self.device,
             ShapeTracker::new(&self.shape, None),
@@ -798,10 +803,10 @@ pub fn run_schedule(mut schedule: VecDeque<ScheduleItem>) {
 
 #[derive(Default, Debug)]
 pub struct FlopCounter {
-    shape: Vec<isize>,
-    dtype: Dtype,
-    flops: f64,
-    mem: HashMap<usize, usize>,
+    pub shape: Vec<isize>,
+    pub dtype: Dtype,
+    pub flops: f64,
+    pub mem: HashMap<usize, usize>,
 }
 
 impl FlopCounter {
@@ -858,7 +863,7 @@ impl FlopCounter {
         Self {
             flops: self.flops + y.flops + self.shape.iter().product::<isize>() as f64,
             shape: self.shape,
-            dtype: least_upper_dtype(&[self.dtype.clone(), y.dtype.clone()]),
+            dtype: self.dtype,
             mem: self.mem,
         }
     }
@@ -876,7 +881,7 @@ impl FlopCounter {
         Self {
             flops: self.flops + y.flops + z.flops + self.shape.iter().product::<isize>() as f64,
             shape: self.shape,
-            dtype: least_upper_dtype(&[y.dtype.clone(), z.dtype.clone()]),
+            dtype: y.dtype,
             mem: self.mem,
         }
     }
@@ -1200,4 +1205,47 @@ pub fn create_schedule<'a>(
     }
     v![_recursive_schedule(x.base_ref(), seen, &mut realizes, &mut reduce_for_op), for x in outs]
         .concat()
+}
+
+pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
+    let srcs = vec![vec![ast.clone()], ast.src()].concat();
+    for o in srcs {
+        match o.optype() {
+            OpType::Unary(_) => return get_lazyop_info(&o.lo().src[0]).unary(),
+            OpType::Binary(b) => {
+                //println!("-------------------{}", o.lo().src[0].src().len());
+                //let Buffers::LazyBuffer(lb) = o.lo().src[0].lo().args[0].to_buf() else { panic!() };
+                return get_lazyop_info(&o.lo().src[0]).binary(get_lazyop_info(&o.lo().src[1]));
+            }
+            OpType::Reduce(_) => {
+                //println!("REDUCE REDUCE REDUCE\n{:?}", o);
+                return get_lazyop_info(&o.lo().src[0]).reduce(&o.lo().args[0].to_shape());
+            }
+            OpType::Ternary(t) => match t {
+                ops::Ternary::Where => {
+                    return get_lazyop_info(&o.lo().src[0]).ternary_where(
+                        get_lazyop_info(&o.lo().src[1]),
+                        get_lazyop_info(&o.lo().src[2]),
+                    )
+                }
+                t => println!("{t:?}"),
+            },
+            OpType::Buffer(b) => match b {
+                ops::Buffer::Load => {
+                    //println!("{:?}", o);
+                    return FlopCounter::buffer_load(&o.lo().args[0].to_buf());
+                }
+                ops::Buffer::Store => {
+                    return get_lazyop_info(&o).buffer_store(&o.lo().args[0].to_buf())
+                }
+                ops::Buffer::Const => {
+                    //println!("CONST CONST CONST\n{:?}", o);
+                    return FlopCounter::buffer_const(&o.lo().args[0].to_buf());
+                }
+                t => println!("{t:?}"),
+            },
+            t => println!("{t:?}"),
+        }
+    }
+    unreachable!()
 }
