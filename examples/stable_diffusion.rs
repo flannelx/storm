@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use kdam::tqdm;
 use kdam::BarExt;
+use num_traits::NumCast;
 use regex::bytes::Regex;
 use serde_json::Value;
 use storm::nn::*;
@@ -980,7 +981,7 @@ impl Tokenizer {
 }
 
 pub struct StableDiffusion {
-    alphas_comprod: Vec<f32>,
+    alphas_comprod: Vec<TensorDefaultType>,
     model: UNetModel,
     first_stage_model: AutoencoderKL,
     cond_stage_model: Option<CLIPTextTransformer>,
@@ -1075,29 +1076,29 @@ fn load_text_model(mut text_model: &mut CLIPTextTransformer, filename: impl AsRe
     let file = File::open(filename).unwrap();
     let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
     let tensors = SafeTensors::deserialize(&buffer).unwrap();
-    text_model.embeddings.position_embedding.weight.assign_device_buffer(tt(&format!("text_model.embeddings.position_embedding.weight"), &tensors));
-    text_model.embeddings.token_embedding.weight.assign_device_buffer(tt(&format!("text_model.embeddings.token_embedding.weight"), &tensors));
+    text_model.embeddings.position_embedding.weight.assign_like(tt(&format!("text_model.embeddings.position_embedding.weight"), &tensors));
+    text_model.embeddings.token_embedding.weight.assign_like(tt(&format!("text_model.embeddings.token_embedding.weight"), &tensors));
     for (i, l) in text_model.encoder.layers.iter_mut().enumerate() {
-        l.self_attn.q_proj.weights.assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.q_proj.weight"), &tensors));
-        l.self_attn.q_proj.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.q_proj.bias"), &tensors));
-        l.self_attn.k_proj.weights.assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.k_proj.weight"), &tensors));
-        l.self_attn.k_proj.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.k_proj.bias"), &tensors));
-        l.self_attn.v_proj.weights.assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.v_proj.weight"), &tensors));
-        l.self_attn.v_proj.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.v_proj.bias"), &tensors));
-        l.self_attn.out_proj.weights.assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.out_proj.weight"), &tensors));
-        l.self_attn.out_proj.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.self_attn.out_proj.bias"), &tensors));
-        l.layer_norm1.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.layer_norm1.weight"), &tensors));
-        l.layer_norm1.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.layer_norm1.bias"), &tensors));
-        l.mlp.fc1.weights.assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.mlp.fc1.weight"), &tensors));
-        l.mlp.fc1.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.mlp.fc1.bias"), &tensors));
-        l.mlp.fc2.weights.assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.mlp.fc2.weight"), &tensors));
-        l.mlp.fc2.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.mlp.fc2.bias"), &tensors));
-        l.layer_norm2.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.layer_norm2.weight"), &tensors));
-        l.layer_norm2.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.encoder.layers.{i}.layer_norm2.bias"), &tensors));
+        l.self_attn.q_proj.weights.assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.q_proj.weight"), &tensors));
+        l.self_attn.q_proj.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.q_proj.bias"), &tensors));
+        l.self_attn.k_proj.weights.assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.k_proj.weight"), &tensors));
+        l.self_attn.k_proj.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.k_proj.bias"), &tensors));
+        l.self_attn.v_proj.weights.assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.v_proj.weight"), &tensors));
+        l.self_attn.v_proj.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.v_proj.bias"), &tensors));
+        l.self_attn.out_proj.weights.assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.out_proj.weight"), &tensors));
+        l.self_attn.out_proj.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.self_attn.out_proj.bias"), &tensors));
+        l.layer_norm1.weights.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.layer_norm1.weight"), &tensors));
+        l.layer_norm1.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.layer_norm1.bias"), &tensors));
+        l.mlp.fc1.weights.assign_like(tt(&format!("text_model.encoder.layers.{i}.mlp.fc1.weight"), &tensors));
+        l.mlp.fc1.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.mlp.fc1.bias"), &tensors));
+        l.mlp.fc2.weights.assign_like(tt(&format!("text_model.encoder.layers.{i}.mlp.fc2.weight"), &tensors));
+        l.mlp.fc2.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.mlp.fc2.bias"), &tensors));
+        l.layer_norm2.weights.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.layer_norm2.weight"), &tensors));
+        l.layer_norm2.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.encoder.layers.{i}.layer_norm2.bias"), &tensors));
     }
 
-    text_model.final_layer_norm.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.final_layer_norm.weight"), &tensors));
-    text_model.final_layer_norm.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("text_model.final_layer_norm.bias"), &tensors));
+    text_model.final_layer_norm.weights.as_mut().unwrap().assign_like(tt(&format!("text_model.final_layer_norm.weight"), &tensors));
+    text_model.final_layer_norm.bias.as_mut().unwrap().assign_like(tt(&format!("text_model.final_layer_norm.bias"), &tensors));
 }
 
 #[rustfmt::skip]
@@ -1107,8 +1108,8 @@ fn load_unet(mut unet: &mut UNetModel, filename: impl AsRef<Path>) {
     let tensors = SafeTensors::deserialize(&buffer).unwrap();
     for (i, l) in unet.time_embedding.iter_mut().enumerate() {
         let i = i + 1;
-        l.weights.assign_device_buffer(tt(&format!("time_embedding.linear_{i}.weight"), &tensors));
-        l.bias.as_mut().unwrap().assign_device_buffer(tt(
+        l.weights.assign_like(tt(&format!("time_embedding.linear_{i}.weight"), &tensors));
+        l.bias.as_mut().unwrap().assign_like(tt(
             &format!("time_embedding.linear_{i}.bias"),
             &tensors,
         ));
@@ -1120,16 +1121,16 @@ fn load_unet(mut unet: &mut UNetModel, filename: impl AsRef<Path>) {
     let up_blocks = v![y, for y in x.iter_mut(), for x in unet.output_blocks.iter_mut()];
     load_blocks("up_blocks", up_blocks, &tensors);
 
-    unet.out_conv.weights.assign_device_buffer(tt(&format!("conv_out.weight"), &tensors));
+    unet.out_conv.weights.assign_like(tt(&format!("conv_out.weight"), &tensors));
     unet.out_conv.bias = Some(tt(&format!("conv_out.bias"), &tensors));
 
-    unet.out_gn.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("conv_norm_out.weight"), &tensors));
-    unet.out_gn.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("conv_norm_out.bias"), &tensors));
+    unet.out_gn.weights.as_mut().unwrap().assign_like(tt(&format!("conv_norm_out.weight"), &tensors));
+    unet.out_gn.bias.as_mut().unwrap().assign_like(tt(&format!("conv_norm_out.bias"), &tensors));
 }
 
 fn tt(name: &str, tensors: &SafeTensors) -> Tensor {
     println!("loading {name}");
-    let ret = Tensor::from_bytes(tensors.tensor(name).unwrap().data());
+    let ret = Tensor::from_bytes(tensors.tensor(name).unwrap().data()).cast(float16).realize();
     //println!("data {:?}", ret.nd());
     ret
 }
@@ -1147,78 +1148,78 @@ fn load_blocks(block_name: &str, blocks: Vec<&mut UnetComponent>, tensors: &Safe
         };
         match b {
             UnetComponent::Conv2d(bb) => {
-                bb.weights.assign_device_buffer(tt(&format!("conv_in.weight"), &tensors));
+                bb.weights.assign_like(tt(&format!("conv_in.weight"), &tensors));
                 bb.bias = Some(tt(&format!("conv_in.bias"), &tensors));
             }
             UnetComponent::ResBlock(bb) => {
-                bb.in_gn.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.resnets.{res}.norm1.weight"), &tensors));
-                bb.in_gn.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.resnets.{res}.norm1.bias"), &tensors));
-                bb.in_conv.weights.assign_device_buffer(tt(&format!("{block}.resnets.{res}.conv1.weight"), &tensors));
+                bb.in_gn.weights.as_mut().unwrap().assign_like(tt(&format!("{block}.resnets.{res}.norm1.weight"), &tensors));
+                bb.in_gn.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.resnets.{res}.norm1.bias"), &tensors));
+                bb.in_conv.weights.assign_like(tt(&format!("{block}.resnets.{res}.conv1.weight"), &tensors));
                 bb.in_conv.bias = Some(tt(&format!("{block}.resnets.{res}.conv1.bias"), &tensors));
 
-                bb.emb_lin.weights.assign_device_buffer(tt(&format!("{block}.resnets.{res}.time_emb_proj.weight"), &tensors));
-                bb.emb_lin.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.resnets.{res}.time_emb_proj.bias"), &tensors));
+                bb.emb_lin.weights.assign_like(tt(&format!("{block}.resnets.{res}.time_emb_proj.weight"), &tensors));
+                bb.emb_lin.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.resnets.{res}.time_emb_proj.bias"), &tensors));
 
-                bb.out_gn.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.resnets.{res}.norm2.weight"), &tensors));
-                bb.out_gn.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.resnets.{res}.norm2.bias"), &tensors));
-                bb.out_conv.weights.assign_device_buffer(tt(&format!("{block}.resnets.{res}.conv2.weight"), &tensors));
+                bb.out_gn.weights.as_mut().unwrap().assign_like(tt(&format!("{block}.resnets.{res}.norm2.weight"), &tensors));
+                bb.out_gn.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.resnets.{res}.norm2.bias"), &tensors));
+                bb.out_conv.weights.assign_like(tt(&format!("{block}.resnets.{res}.conv2.weight"), &tensors));
                 bb.out_conv.bias = Some(tt(&format!("{block}.resnets.{res}.conv2.bias"), &tensors));
 
                 if bb.conv_shortcut.is_some() {
-                    bb.conv_shortcut.as_mut().unwrap().weights.assign_device_buffer(tt(&format!("{block}.resnets.{res}.conv_shortcut.weight"), &tensors));
+                    bb.conv_shortcut.as_mut().unwrap().weights.assign_like(tt(&format!("{block}.resnets.{res}.conv_shortcut.weight"), &tensors));
                     bb.conv_shortcut.as_mut().unwrap().bias = Some(tt(&format!("{block}.resnets.{res}.conv_shortcut.bias"), &tensors));
                 }
                 res += 1;
             }
             UnetComponent::SpatialTransformer(bb) => {
-                bb.norm.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.norm.weight"), &tensors));
-                bb.norm.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.norm.bias"), &tensors));
-                bb.proj_in.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.proj_in.weight"), &tensors));
+                bb.norm.weights.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.norm.weight"), &tensors));
+                bb.norm.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.norm.bias"), &tensors));
+                bb.proj_in.weights.assign_like(tt(&format!("{block}.attentions.{atn}.proj_in.weight"), &tensors));
                 bb.proj_in.bias = Some(tt(&format!("{block}.attentions.{atn}.proj_in.bias"), &tensors));
-                bb.proj_out.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.proj_out.weight"), &tensors));
+                bb.proj_out.weights.assign_like(tt(&format!("{block}.attentions.{atn}.proj_out.weight"), &tensors));
                 bb.proj_out.bias = Some(tt(&format!("{block}.attentions.{atn}.proj_out.bias"), &tensors));
 
-                bb.transformer_block[0].attn1.to_q.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_q.weight"), &tensors));
+                bb.transformer_block[0].attn1.to_q.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_q.weight"), &tensors));
                 bb.transformer_block[0].attn1.to_q.bias = None;
-                bb.transformer_block[0].attn1.to_k.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_k.weight"), &tensors));
+                bb.transformer_block[0].attn1.to_k.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_k.weight"), &tensors));
                 bb.transformer_block[0].attn1.to_k.bias = None;
-                bb.transformer_block[0].attn1.to_v.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_v.weight"), &tensors));
+                bb.transformer_block[0].attn1.to_v.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_v.weight"), &tensors));
                 bb.transformer_block[0].attn1.to_v.bias = None;
-                bb.transformer_block[0].attn1.to_out[0].weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_out.0.weight"), &tensors));
-                bb.transformer_block[0].attn1.to_out[0].bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_out.0.bias"), &tensors));
+                bb.transformer_block[0].attn1.to_out[0].weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_out.0.weight"), &tensors));
+                bb.transformer_block[0].attn1.to_out[0].bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn1.to_out.0.bias"), &tensors));
 
 
-                bb.transformer_block[0].attn2.to_q.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_q.weight"), &tensors));
+                bb.transformer_block[0].attn2.to_q.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_q.weight"), &tensors));
                 bb.transformer_block[0].attn2.to_q.bias = None;
-                bb.transformer_block[0].attn2.to_k.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_k.weight"), &tensors));
+                bb.transformer_block[0].attn2.to_k.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_k.weight"), &tensors));
                 bb.transformer_block[0].attn2.to_k.bias = None;
-                bb.transformer_block[0].attn2.to_v.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_v.weight"), &tensors));
+                bb.transformer_block[0].attn2.to_v.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_v.weight"), &tensors));
                 bb.transformer_block[0].attn2.to_v.bias = None;
-                bb.transformer_block[0].attn2.to_out[0].weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_out.0.weight"), &tensors));
-                bb.transformer_block[0].attn2.to_out[0].bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_out.0.bias"), &tensors));
+                bb.transformer_block[0].attn2.to_out[0].weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_out.0.weight"), &tensors));
+                bb.transformer_block[0].attn2.to_out[0].bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.attn2.to_out.0.bias"), &tensors));
 
-                bb.transformer_block[0].ff.geglu.proj.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.0.proj.weight"), &tensors));
-                bb.transformer_block[0].ff.geglu.proj.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.0.proj.bias"), &tensors));
-                bb.transformer_block[0].ff.lin.weights.assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.2.weight"), &tensors));
-                bb.transformer_block[0].ff.lin.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.2.bias"), &tensors));
+                bb.transformer_block[0].ff.geglu.proj.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.0.proj.weight"), &tensors));
+                bb.transformer_block[0].ff.geglu.proj.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.0.proj.bias"), &tensors));
+                bb.transformer_block[0].ff.lin.weights.assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.2.weight"), &tensors));
+                bb.transformer_block[0].ff.lin.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.ff.net.2.bias"), &tensors));
 
-                bb.transformer_block[0].norm1.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm1.weight"), &tensors));
-                bb.transformer_block[0].norm1.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm1.bias"), &tensors));
-                bb.transformer_block[0].norm2.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm2.weight"), &tensors));
-                bb.transformer_block[0].norm2.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm2.bias"), &tensors));
-                bb.transformer_block[0].norm3.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm3.weight"), &tensors));
-                bb.transformer_block[0].norm3.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm3.bias"), &tensors));
+                bb.transformer_block[0].norm1.weights.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm1.weight"), &tensors));
+                bb.transformer_block[0].norm1.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm1.bias"), &tensors));
+                bb.transformer_block[0].norm2.weights.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm2.weight"), &tensors));
+                bb.transformer_block[0].norm2.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm2.bias"), &tensors));
+                bb.transformer_block[0].norm3.weights.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm3.weight"), &tensors));
+                bb.transformer_block[0].norm3.bias.as_mut().unwrap().assign_like(tt(&format!("{block}.attentions.{atn}.transformer_blocks.0.norm3.bias"), &tensors));
                 atn += 1;
             }
             UnetComponent::Downsample(bb) => {
-                bb.conv.weights.assign_device_buffer(tt(&format!("{block}.downsamplers.0.conv.weight"), &tensors));
+                bb.conv.weights.assign_like(tt(&format!("{block}.downsamplers.0.conv.weight"), &tensors));
                 bb.conv.bias = Some(tt(&format!("{block}.downsamplers.0.conv.bias"), &tensors));
                 i += 1;
                 atn = 0;
                 res = 0;
             }
             UnetComponent::Upsample(bb) => {
-                bb.conv.weights.assign_device_buffer(tt(&format!("{block}.upsamplers.0.conv.weight"), &tensors));
+                bb.conv.weights.assign_like(tt(&format!("{block}.upsamplers.0.conv.weight"), &tensors));
                 bb.conv.bias = Some(tt(&format!("{block}.upsamplers.0.conv.bias"), &tensors));
                 i += 1;
                 atn = 0;
@@ -1235,16 +1236,16 @@ fn load_vae(mut model: &mut AutoencoderKL, filename: impl AsRef<Path>)  {
     let buffer = unsafe { MmapOptions::new().map(&file).unwrap() };
     let tensors = SafeTensors::deserialize(&buffer).unwrap();
     fn load_resnet(name: &str, res: &mut ResnetBlock, tensors: &SafeTensors) {
-        res.conv1.weights.assign_device_buffer(tt(&format!("{name}.conv1.weight"), &tensors));
+        res.conv1.weights.assign_like(tt(&format!("{name}.conv1.weight"), &tensors));
         res.conv1.bias = Some(tt(&format!("{name}.conv1.bias"), &tensors));
-        res.conv2.weights.assign_device_buffer(tt(&format!("{name}.conv2.weight"), &tensors));
+        res.conv2.weights.assign_like(tt(&format!("{name}.conv2.weight"), &tensors));
         res.conv2.bias = Some(tt(&format!("{name}.conv2.bias"), &tensors));
-        res.norm1.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{name}.norm1.weight"), &tensors));
-        res.norm1.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{name}.norm1.bias"), &tensors));
-        res.norm2.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{name}.norm2.weight"), &tensors));
-        res.norm2.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{name}.norm2.bias"), &tensors));
+        res.norm1.weights.as_mut().unwrap().assign_like(tt(&format!("{name}.norm1.weight"), &tensors));
+        res.norm1.bias.as_mut().unwrap().assign_like(tt(&format!("{name}.norm1.bias"), &tensors));
+        res.norm2.weights.as_mut().unwrap().assign_like(tt(&format!("{name}.norm2.weight"), &tensors));
+        res.norm2.bias.as_mut().unwrap().assign_like(tt(&format!("{name}.norm2.bias"), &tensors));
         if let Some(short_cut) = res.nin_shortcut.as_mut() {
-            short_cut.weights.assign_device_buffer(tt(&format!("{name}.conv_shortcut.weight"), &tensors));
+            short_cut.weights.assign_like(tt(&format!("{name}.conv_shortcut.weight"), &tensors));
             short_cut.bias = Some(tt(&format!("{name}.conv_shortcut.bias"), &tensors));
         }
     }
@@ -1252,22 +1253,22 @@ fn load_vae(mut model: &mut AutoencoderKL, filename: impl AsRef<Path>)  {
     let x = "encoder";
     let sampler = "down";
 
-    model.encoder.conv_in.weights.assign_device_buffer(tt(&format!("{x}.conv_in.weight"), &tensors));
+    model.encoder.conv_in.weights.assign_like(tt(&format!("{x}.conv_in.weight"), &tensors));
     model.encoder.conv_in.bias = Some(tt(&format!("{x}.conv_in.bias"), &tensors));
 
     // Mid
     load_resnet(&format!("{x}.mid_block.resnets.0"), &mut model.encoder.mid.block_1, &tensors);
     load_resnet(&format!("{x}.mid_block.resnets.1"), &mut model.encoder.mid.block_2, &tensors);
-    model.encoder.mid.attn_1.q.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.query.weight"), &tensors));
+    model.encoder.mid.attn_1.q.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.query.weight"), &tensors));
     model.encoder.mid.attn_1.q.bias = Some(tt(&format!("{x}.mid_block.attentions.0.query.bias"), &tensors));
-    model.encoder.mid.attn_1.k.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.key.weight"), &tensors));
+    model.encoder.mid.attn_1.k.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.key.weight"), &tensors));
     model.encoder.mid.attn_1.k.bias = Some(tt(&format!("{x}.mid_block.attentions.0.key.bias"), &tensors));
-    model.encoder.mid.attn_1.v.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.value.weight"), &tensors));
+    model.encoder.mid.attn_1.v.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.value.weight"), &tensors));
     model.encoder.mid.attn_1.v.bias = Some(tt(&format!("{x}.mid_block.attentions.0.value.bias"), &tensors));
-    model.encoder.mid.attn_1.proj_out.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.proj_attn.weight"), &tensors));
+    model.encoder.mid.attn_1.proj_out.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.proj_attn.weight"), &tensors));
     model.encoder.mid.attn_1.proj_out.bias = Some(tt(&format!("{x}.mid_block.attentions.0.proj_attn.bias"), &tensors));
-    model.encoder.mid.attn_1.norm.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.group_norm.weight"), &tensors));
-    model.encoder.mid.attn_1.norm.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.group_norm.bias"), &tensors));
+    model.encoder.mid.attn_1.norm.weights.as_mut().unwrap().assign_like(tt(&format!("{x}.mid_block.attentions.0.group_norm.weight"), &tensors));
+    model.encoder.mid.attn_1.norm.bias.as_mut().unwrap().assign_like(tt(&format!("{x}.mid_block.attentions.0.group_norm.bias"), &tensors));
 
     // Down
     for (i, block) in model.encoder.down.iter_mut().enumerate() {
@@ -1276,37 +1277,37 @@ fn load_vae(mut model: &mut AutoencoderKL, filename: impl AsRef<Path>)  {
             load_resnet(&name, res, &tensors);
         }
         for (ci, conv) in block.1.iter_mut().enumerate() {
-            conv.weights.assign_device_buffer(tt(&format!("{x}.{sampler}_blocks.{i}.{sampler}samplers.{ci}.conv.weight"), &tensors));
+            conv.weights.assign_like(tt(&format!("{x}.{sampler}_blocks.{i}.{sampler}samplers.{ci}.conv.weight"), &tensors));
             conv.bias = Some(tt(&format!("{x}.{sampler}_blocks.{i}.{sampler}samplers.{ci}.conv.bias"), &tensors));
         }
     }
 
-    model.encoder.norm_out.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.conv_norm_out.weight"), &tensors));
-    model.encoder.norm_out.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.conv_norm_out.bias"), &tensors));
+    model.encoder.norm_out.weights.as_mut().unwrap().assign_like(tt(&format!("{x}.conv_norm_out.weight"), &tensors));
+    model.encoder.norm_out.bias.as_mut().unwrap().assign_like(tt(&format!("{x}.conv_norm_out.bias"), &tensors));
 
-    model.encoder.conv_out.weights.assign_device_buffer(tt(&format!("{x}.conv_out.weight"), &tensors));
+    model.encoder.conv_out.weights.assign_like(tt(&format!("{x}.conv_out.weight"), &tensors));
     model.encoder.conv_out.bias = Some(tt(&format!("{x}.conv_out.bias"), &tensors));
 
 
     let x = "decoder";
     let sampler = "up";
 
-    model.decoder.conv_in.weights.assign_device_buffer(tt(&format!("{x}.conv_in.weight"), &tensors));
+    model.decoder.conv_in.weights.assign_like(tt(&format!("{x}.conv_in.weight"), &tensors));
     model.decoder.conv_in.bias = Some(tt(&format!("{x}.conv_in.bias"), &tensors));
 
     // Mid
     load_resnet(&format!("{x}.mid_block.resnets.0"), &mut model.decoder.mid.block_1, &tensors);
     load_resnet(&format!("{x}.mid_block.resnets.1"), &mut model.decoder.mid.block_2, &tensors);
-    model.decoder.mid.attn_1.q.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.query.weight"), &tensors));
+    model.decoder.mid.attn_1.q.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.query.weight"), &tensors));
     model.decoder.mid.attn_1.q.bias = Some(tt(&format!("{x}.mid_block.attentions.0.query.bias"), &tensors));
-    model.decoder.mid.attn_1.k.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.key.weight"), &tensors));
+    model.decoder.mid.attn_1.k.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.key.weight"), &tensors));
     model.decoder.mid.attn_1.k.bias = Some(tt(&format!("{x}.mid_block.attentions.0.key.bias"), &tensors));
-    model.decoder.mid.attn_1.v.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.value.weight"), &tensors));
+    model.decoder.mid.attn_1.v.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.value.weight"), &tensors));
     model.decoder.mid.attn_1.v.bias = Some(tt(&format!("{x}.mid_block.attentions.0.value.bias"), &tensors));
-    model.decoder.mid.attn_1.proj_out.weights.assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.proj_attn.weight"), &tensors));
+    model.decoder.mid.attn_1.proj_out.weights.assign_like(tt(&format!("{x}.mid_block.attentions.0.proj_attn.weight"), &tensors));
     model.decoder.mid.attn_1.proj_out.bias = Some(tt(&format!("{x}.mid_block.attentions.0.proj_attn.bias"), &tensors));
-    model.decoder.mid.attn_1.norm.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.group_norm.weight"), &tensors));
-    model.decoder.mid.attn_1.norm.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.mid_block.attentions.0.group_norm.bias"), &tensors));
+    model.decoder.mid.attn_1.norm.weights.as_mut().unwrap().assign_like(tt(&format!("{x}.mid_block.attentions.0.group_norm.weight"), &tensors));
+    model.decoder.mid.attn_1.norm.bias.as_mut().unwrap().assign_like(tt(&format!("{x}.mid_block.attentions.0.group_norm.bias"), &tensors));
 
     // Up
     for (i, block) in model.decoder.up.iter_mut().rev().enumerate() {
@@ -1315,25 +1316,25 @@ fn load_vae(mut model: &mut AutoencoderKL, filename: impl AsRef<Path>)  {
             load_resnet(&name, res, &tensors);
         }
         for (ci, conv) in block.1.iter_mut().enumerate() {
-            conv.weights.assign_device_buffer(tt(&format!("{x}.{sampler}_blocks.{i}.{sampler}samplers.{ci}.conv.weight"), &tensors));
+            conv.weights.assign_like(tt(&format!("{x}.{sampler}_blocks.{i}.{sampler}samplers.{ci}.conv.weight"), &tensors));
             conv.bias = Some(tt(&format!("{x}.{sampler}_blocks.{i}.{sampler}samplers.{ci}.conv.bias"), &tensors));
         }
     }
 
-    model.decoder.norm_out.weights.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.conv_norm_out.weight"), &tensors));
-    model.decoder.norm_out.bias.as_mut().unwrap().assign_device_buffer(tt(&format!("{x}.conv_norm_out.bias"), &tensors));
+    model.decoder.norm_out.weights.as_mut().unwrap().assign_like(tt(&format!("{x}.conv_norm_out.weight"), &tensors));
+    model.decoder.norm_out.bias.as_mut().unwrap().assign_like(tt(&format!("{x}.conv_norm_out.bias"), &tensors));
 
-    model.decoder.conv_out.weights.assign_device_buffer(tt(&format!("{x}.conv_out.weight"), &tensors));
+    model.decoder.conv_out.weights.assign_like(tt(&format!("{x}.conv_out.weight"), &tensors));
     model.decoder.conv_out.bias = Some(tt(&format!("{x}.conv_out.bias"), &tensors));
 
 
-    model.quant_conv.weights.assign_device_buffer(tt(&format!("quant_conv.weight"), &tensors));
+    model.quant_conv.weights.assign_like(tt(&format!("quant_conv.weight"), &tensors));
     model.quant_conv.bias = Some(tt(&format!("quant_conv.bias"), &tensors));
-    model.post_quant_conv.weights.assign_device_buffer(tt(&format!("post_quant_conv.weight"), &tensors));
+    model.post_quant_conv.weights.assign_like(tt(&format!("post_quant_conv.weight"), &tensors));
     model.post_quant_conv.bias = Some(tt(&format!("post_quant_conv.bias"), &tensors));
 }
 
-fn alpha_cumprod(start: Option<f32>, end: Option<f32>, steps: Option<isize>) -> Vec<f32> {
+fn alpha_cumprod(start: Option<f32>, end: Option<f32>, steps: Option<isize>) -> Vec<TensorDefaultType> {
     let start = start.unwrap_or(0.00085).powf(0.5);
     let end = end.unwrap_or(0.0120).powf(0.5);
     let steps = steps.unwrap_or(1000) as f32;
@@ -1412,7 +1413,7 @@ async fn main() {
     let timesteps = (1..1000).step_by(1000 / steps);
     let alphas = v![model.alphas_comprod[i], for i in timesteps.clone()];
     let mut alphas_prev = v![model.alphas_comprod[i], for i in timesteps.clone().rev().skip(1)];
-    alphas_prev.push(1.0);
+    alphas_prev.push(TensorDefaultType::from_f32(1.0).unwrap());
     alphas_prev.reverse();
 
     let mut pb = tqdm!(total = steps);
@@ -1422,7 +1423,6 @@ async fn main() {
     let mut latent = Tensor::randn([1, 4, w, h]);
     for (i, (index, timestep)) in timesteps.enumerate().rev().enumerate() {
         let s = std::time::Instant::now();
-        let tid = Tensor::_const(index as f32);
         latent = model
             .call(
                 &uncon_context,
@@ -1448,7 +1448,7 @@ async fn main() {
 
     x = (x + 1.) / 2.;
     x = x.reshape([3, w * 8, h * 8]).permute([1, 2, 0]).clip(0., 1.) * 255.;
-    let image_data = x.to_vec().into_iter().map(|s| s as u8).collect::<Vec<u8>>();
+    let image_data = x.to_vec().into_iter().map(|s| s.to_u8().unwrap()).collect::<Vec<u8>>();
     let tmp_dir = temp_dir();
     let path = tmp_dir.join("stable_diffusion.jpg");
     image::save_buffer_with_format(

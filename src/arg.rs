@@ -17,6 +17,13 @@ pub enum Arg {
 }
 
 impl Arg {
+    pub fn to_dtype(&self) -> Dtype {
+        match self {
+            Arg::Dtype(d) => d.clone(),
+            t => panic!("Can not to_dtype() {t:?}"),
+        }
+    }
+
     pub fn to_shape(&self) -> Vec<isize> {
         match self {
             Arg::Shape(s) => s.clone(),

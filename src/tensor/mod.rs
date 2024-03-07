@@ -44,7 +44,6 @@ pub struct Tensor {
     pub grad: Arc<Mutex<Option<Tensor>>>,
     pub _ctx: Option<Box<dyn Function>>,
     pub id: TensorId,
-    pub dtype: Dtype,
     pub device: String,
 }
 
@@ -53,8 +52,8 @@ impl Tensor {
         self.device.clone()
     }
 
-    pub fn dtype(&self) -> String {
-        self.dtype.type_name.to_string()
+    pub fn dtype(&self) -> Dtype {
+        self.buffer.dtype.clone()
     }
 
     pub fn shape(&self) -> Shape {
@@ -71,7 +70,6 @@ impl Tensor {
             grad: Arc::default(),
             _ctx: None,
             id: tensor_id(),
-            dtype: buf.dtype.clone(),
             device: buf.device.clone(),
             buffer: buf.into(),
         }
@@ -79,10 +77,10 @@ impl Tensor {
 
     pub fn from<E: dtype::NumType, V: Into<Vec<E>>>(data: V) -> Self {
         let data = data
-            .into();
-            // .into_iter()
-            // .map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap())
-            // .collect::<Vec<TensorDefaultType>>();
+            .into()
+            .into_iter()
+            .map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap())
+            .collect::<Vec<TensorDefaultType>>();
         let buffer = if data.len() == 1 {
             LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>(), "GPU")
         } else {
@@ -93,7 +91,6 @@ impl Tensor {
             _ctx: None,
             id: tensor_id(),
             grad: Arc::new(Mutex::new(None)),
-            dtype: buffer.dtype.clone(),
             device: buffer.device.clone(),
             buffer: buffer.into(),
         }
@@ -110,7 +107,6 @@ impl Tensor {
             _ctx: None,
             id: tensor_id(),
             grad: Arc::new(Mutex::new(None)),
-            dtype: buffer.dtype.clone(),
             device: buffer.device.clone(),
             buffer: buffer.into(),
         }
@@ -145,7 +141,7 @@ impl Tensor {
     pub fn to_vec(&self) -> Vec<TensorDefaultType> {
         type T = TensorDefaultType;
         assert!(
-            std::any::type_name::<T>().split("::").last().unwrap() == self.dtype(),
+            std::any::type_name::<T>().split("::").last().unwrap() == self.dtype().type_name,
             "cannot return Tensor<{}> to Vec<{}>",
             self.dtype(),
             std::any::type_name::<T>().split("::").last().unwrap()
@@ -206,8 +202,13 @@ impl Tensor {
     }
 
     pub fn _const<N: NumType>(value: N) -> Self {
-        let dtype = crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>());
-        Self::from_buf(LazyBuffer::_const(value, dtype, "GPU"))
+        let dtype = crate::dtype::name_to_dtype(std::any::type_name::<N>());
+        let defualt_dtype = if dtype.size > float32.size {
+            crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>())
+        } else {
+            dtype.clone()
+        };
+        Self::from_buf(LazyBuffer::_const(value, dtype, "GPU")).cast(defualt_dtype)
     }
 
     pub fn const_like<T: NumType>(&self, const_value: T) -> Self {
@@ -394,15 +395,15 @@ impl Tensor {
     // -------- unary
 
     pub fn log(&self) -> Self {
-        Log::default().apply(&self, None, None, None, None)
+        Log::default().apply(&(self.cast(least_upper_float(&self.dtype()))), None, None, None, None)
     }
 
     pub fn log2(&self) -> Self {
-        Log::default().apply(&self, None, None, None, None) / 2.0f32.log(core::f32::consts::E)
+        self.log() / 2.0f32.log(core::f32::consts::E)
     }
 
     pub fn exp(&self) -> Self {
-        Exp::default().apply(&self, None, None, None, None)
+        Exp::default().apply(&(self.cast(least_upper_float(&self.dtype()))), None, None, None, None)
     }
 
     pub fn relu(&self) -> Self {
@@ -419,7 +420,7 @@ impl Tensor {
     }
 
     pub fn sigmoid(&self) -> Self {
-        Sigmoid::default().apply(self, None, None, None, None)
+        Sigmoid::default().apply(&(self.cast(least_upper_float(&self.dtype()))), None, None, None, None)
     }
 
     pub fn tanh(&self) -> Self {
@@ -445,7 +446,7 @@ impl Tensor {
     }
 
     pub fn sin(&self) -> Self {
-        Sin::default().apply(self, None, None, None, None)
+        Sin::default().apply(&(self.cast(least_upper_float(&self.dtype()))), None, None, None, None)
     }
 
     pub fn cos(&self) -> Self {
@@ -453,7 +454,7 @@ impl Tensor {
     }
 
     pub fn sqrt(&self) -> Self {
-        Sqrt::default().apply(self, None, None, None, None)
+        Sqrt::default().apply(&(self.cast(least_upper_float(&self.dtype()))), None, None, None, None)
     }
 
     pub fn rsqrt(&self) -> Self {
@@ -465,19 +466,19 @@ impl Tensor {
     }
 
     pub fn sum<S: Into<Vec<isize>>>(&self, axis: S, keepdim: bool) -> Self {
-        let acc_dtype = if self.dtype.is_unsigned() {
-            least_upper_dtype(&[self.dtype.clone(), uint32])
-        } else if self.dtype.is_int() || self.dtype == _bool {
-            least_upper_dtype(&[self.dtype.clone(), int32])
-        }else {
-            least_upper_dtype(&[self.dtype.clone(), float32])
+        let acc_dtype = if self.dtype().is_unsigned() {
+            least_upper_dtype(&[self.dtype().clone(), uint32])
+        } else if self.dtype().is_int() || self.dtype() == _bool {
+            least_upper_dtype(&[self.dtype().clone(), int32])
+        } else {
+            least_upper_dtype(&[self.dtype().clone(), float32])
         };
         let mut axis = axis.into();
         if axis.len() == 0 {
             axis = (0..self.shape().len() as isize).collect::<Vec<isize>>();
         }
-        let out_dtype = if matches!(self.dtype, float16 | bfloat16) {
-            self.dtype.clone()
+        let out_dtype = if matches!(self.dtype(), float16 | bfloat16) {
+            self.dtype().clone()
         } else {
             acc_dtype.clone()
         };
@@ -601,19 +602,28 @@ impl Tensor {
                 .concat(),
             )
             .transpose(-1, -(n2.min(2) as isize));
-        let upper_type = least_upper_dtype(&[x.dtype.clone(), w.dtype.clone()]);
+        let upper_type = least_upper_dtype(&[x.dtype(), w.dtype()]);
         (x * w).sum([-1], false).cast(upper_type)
     }
 
-    pub fn _broadcast_r(x: &Self, y: &Self) -> (Self, Self) {
-        Self::_broadcast(y, x)
+    pub fn broadcast_r(x: &Self, y: &Self) -> (Self, Self) {
+        Self::broadcast(y, x)
     }
 
-    pub fn _broadcast(x: &Self, y: &Self) -> (Self, Self) {
+    pub fn broadcast(x: &Self, y: &Self) -> (Self, Self) {
+        Self::_broadcast(x, y, true)
+    }
+
+    pub fn _broadcast(x: &Self, y: &Self, match_type: bool) -> (Self, Self) {
         let mut xshape = x.shape();
         let mut yshape = y.shape();
         let mut x = x.clone();
         let mut y = y.clone();
+        if match_type {
+            let out_dtype = least_upper_dtype(&[x.dtype(), y.dtype()]);
+            x = x.cast(out_dtype.clone());
+            y = y.cast(out_dtype);
+        }
         if xshape == yshape {
             return (x, y);
         }
@@ -888,7 +898,6 @@ impl Tensor {
                 .clone();
             let grads = match t0._ctx.as_mut().unwrap().backward(&t0g_clone) {
                 Grad::One(g) => vec![Some(Tensor {
-                    dtype: g.dtype.clone(),
                     device: g.device.clone(),
                     buffer: g.into(),
                     require_grad: false,
@@ -905,7 +914,6 @@ impl Tensor {
                         //     println!("{:?}", g);
                         // }
                         Some(Tensor {
-                            dtype: g.dtype.clone(),
                             device: g.device.clone(),
                             buffer: g.into(),
                             require_grad: false,
@@ -923,7 +931,6 @@ impl Tensor {
                         //     println!("{:?}", g);
                         // }
                         Some(Tensor {
-                            dtype: g.dtype.clone(),
                             device: g.device.clone(),
                             buffer: g.into(),
                             require_grad: false,
@@ -984,7 +991,7 @@ impl Tensor {
         if rhs.is_const() && rhs.get_const_val().unwrap().is_zero() {
             return self.clone();
         }
-        let (a, b) = Tensor::_broadcast(&self, &rhs);
+        let (a, b) = Tensor::broadcast(&self, &rhs);
         Add {
             need_input_grad: [a.require_grad, b.require_grad],
             ..Default::default()
@@ -996,7 +1003,7 @@ impl Tensor {
         if rhs.is_const() && rhs.get_const_val().unwrap().is_zero() {
             return self.clone();
         }
-        let (a, b) = Tensor::_broadcast(&self, &rhs);
+        let (a, b) = Tensor::broadcast(&self, &rhs);
         Sub {
             need_input_grad: [a.require_grad, b.require_grad],
             ..Default::default()
@@ -1008,7 +1015,7 @@ impl Tensor {
         if rhs.is_const() && rhs.get_const_val().unwrap().is_one() {
             return self.clone();
         }
-        let (a, b) = Tensor::_broadcast(&self, &rhs);
+        let (a, b) = Tensor::broadcast(&self, &rhs);
         Mul {
             need_input_grad: [a.require_grad, b.require_grad],
             ..Default::default()
@@ -1017,7 +1024,7 @@ impl Tensor {
     }
 
     pub fn div(&self, rhs: &Self) -> Self {
-        let (a, b) = Tensor::_broadcast(&self, &rhs);
+        let (a, b) = Tensor::broadcast(&self, &rhs);
         Div {
             need_input_grad: [a.require_grad, b.require_grad],
             ..Default::default()
@@ -1037,25 +1044,6 @@ impl Tensor {
         x.buffer.st = ShapeTracker::from_shape(&x.shape().dims);
         self.buffer = x.buffer;
         self.clone()
-    }
-
-    pub fn assign_device_buffer(&mut self, mut x: Self) -> Self {
-        assert!(
-            self.numel() == x.numel(),
-            "{}:{} != {}",
-            self.shape(),
-            self.numel(),
-            x.numel()
-        );
-        self.assign_like(x)
-        // unsafe {
-        //     Arc::get_mut_unchecked(&mut self.buffer.device_buffer.clone())
-        //         .replace((*x.buffer.device_buffer).as_ref().unwrap().clone());
-        // }
-        // self.buffer.device_buffer = x.buffer.device_buffer;
-        // self.buffer.lazyop.src.clear();
-        // self.buffer.lazyop.buffers.clear();
-        // self.clone()
     }
 
     pub fn arange<N: NumType>(to: N) -> Self {
@@ -1163,7 +1151,7 @@ impl Tensor {
     }
 
     pub fn _lt(&self, rhs: &Self) -> Self {
-        let (a, b) = Tensor::_broadcast(&self, &rhs);
+        let (a, b) = Tensor::broadcast(&self, &rhs);
         Less::default().apply(&a, Some(&b), None, None, None)
     }
 
@@ -1172,7 +1160,7 @@ impl Tensor {
     }
 
     pub fn _gt(&self, rhs: &Self) -> Self {
-        let (a, b) = Tensor::_broadcast_r(&self, &rhs);
+        let (a, b) = Tensor::broadcast_r(&self, &rhs);
         Less::default().apply(&a, Some(&b), None, None, None)
     }
 
@@ -1195,9 +1183,9 @@ impl Tensor {
     }
 
     pub fn _where_(&self, z: &Self, y: &Self) -> Self {
-        let (x_, y_) = Self::_broadcast(self, y);
-        let (x, z_) = Self::_broadcast(&x_, z);
-        let (y, z) = Self::_broadcast_r(&y_, &z_);
+        let (x_, y_) = Self::_broadcast(self, y, false);
+        let (x, z_) = Self::_broadcast(&x_, z, false);
+        let (y, z) = Self::_broadcast(&z_, &y_, true);
         Where {
             need_input_grad: [self.require_grad, y.require_grad, z.require_grad],
             ..Default::default()
@@ -1247,7 +1235,6 @@ impl Tensor {
             grad: Arc::default(),
             _ctx: None,
             id: tensor_id(),
-            dtype: self.dtype.clone(),
             device: self.device.clone(),
             buffer: self.buffer.clone(),
         }
@@ -1288,8 +1275,12 @@ impl Tensor {
         //ar.mul(&(sign * &base_sign))
     }
 
+    pub fn float(&self) -> Self {
+        self.cast(float32)
+    }
+
     pub fn sign(&self) -> Self {
-        self / &(self.abs() + 1e-12)
+        (self.float() / &(self.float().abs() + 1e-12)).cast(&self.dtype())
     }
 
     pub fn reciprocal(&self) -> Self {
@@ -1346,7 +1337,7 @@ impl Tensor {
             attn_mask = Some(Tensor::ones([self.shape()[-2], key.shape()[-2]]).tril(Some(0)))
         }
         if let Some(am) = attn_mask.as_mut()
-            && am.dtype == _bool
+            && am.dtype() == _bool
         {
             *am = am._eq(&Tensor::_const(0.0))._where(f32::NEG_INFINITY, 0.0);
         }
@@ -1487,9 +1478,13 @@ impl Tensor {
         acc
     }
 
-    pub fn cast(&self, dtype:Dtype) -> Self {
+    pub fn cast<D: Into<Dtype>>(&self, dtype: D) -> Self {
+        let dtype = dtype.into();
         let mut ret = self.clone();
-        ret.buffer = self.buffer.cast(dtype, None);
+        if self.dtype() == dtype {
+            return ret;
+        }
+        ret.buffer = self.buffer.cast(dtype.clone(), None);
         ret
     }
 }

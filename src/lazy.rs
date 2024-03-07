@@ -1211,7 +1211,14 @@ pub fn get_lazyop_info(ast: &LazyOpSrc) -> FlopCounter {
     let srcs = vec![vec![ast.clone()], ast.src()].concat();
     for o in srcs {
         match o.optype() {
-            OpType::Unary(_) => return get_lazyop_info(&o.lo().src[0]).unary(),
+            OpType::Unary(u) => {
+                return match u {
+                    ops::Unary::Cast => {
+                        get_lazyop_info(&o.lo().src[0]).unary_cast(o.lo().args[0].to_dtype())
+                    }
+                    _ => get_lazyop_info(&o.lo().src[0]).unary_cast(float32),
+                }
+            }
             OpType::Binary(b) => {
                 //println!("-------------------{}", o.lo().src[0].src().len());
                 //let Buffers::LazyBuffer(lb) = o.lo().src[0].lo().args[0].to_buf() else { panic!() };

@@ -1,3 +1,5 @@
+use dtype::least_upper_dtype;
+
 use crate::arg::Arg;
 use crate::codegen::kernel::Buffers;
 use crate::v;
@@ -129,10 +131,10 @@ pub trait Renderer: 'static + Send + Sync + Op {
             }
         };
         val
-        // if var_dtype.sz > 1 {
+        // if var_dtype.sz > 1 || var_dtype != dtype::float32 || var_dtype != dtype::int32 {
         //     val
         // } else {
-        //     self.lang_opts().render_cast(&vec![val.as_str(); var_dtype.sz], var_dtype)
+        //     self.render_cast(&vec![val.as_str(); var_dtype.sz], var_dtype)
         // }
     }
 
@@ -580,7 +582,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                 }
             }
             UOps::CAST => {
-                assert!(dtype.is_some() && dtype.as_ref().unwrap().size > 1);
+                //assert!(dtype.is_some() && dtype.as_ref().unwrap().size > 1);
                 let val = lang.render_cast(
                     &vin.iter().map(|x| r[x].as_str()).collect::<Vec<&str>>(),
                     dtype.as_ref().unwrap().clone(),
@@ -590,7 +592,7 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                 } else {
                     kk(
                         &format!(
-                            "{} {} = {val}",
+                            "{} {} = {val};",
                             if lang.lang_opts().generic_var_prefix.is_some() {
                                 lang.lang_opts()
                                     .generic_var_prefix

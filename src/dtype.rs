@@ -15,6 +15,12 @@ pub struct Dtype {
     pub type_name: &'static str,
 }
 
+impl From<&Dtype> for Dtype {
+    fn from(value: &Dtype) -> Self {
+        value.clone()
+    }
+}
+
 impl PartialOrd for Dtype {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.size.cmp(&other.size))
@@ -406,13 +412,26 @@ lazy_static::lazy_static! {
     (bfloat16, HashSet::from([bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  float32,   float32,   bfloat16])),
     ]);
 }
+
 pub fn least_upper_dtype(dtypes: &[Dtype]) -> Dtype {
     let mut rets = HashSet::new();
     for d in dtypes {
         if rets.is_empty() {
+            if !type_rules.contains_key(&d) {
+                panic!("{:?}", d);
+            }
             rets = type_rules[d].clone();
         }
         rets = rets.intersection(&type_rules[d]).cloned().collect();
     }
     rets.iter().min().unwrap().to_owned()
+}
+
+
+pub fn least_upper_float(dtype: &Dtype) -> Dtype {
+    if dtype.is_float() {
+        dtype.clone()
+    } else {
+        least_upper_dtype(&[dtype.clone(), float32])
+    }
 }

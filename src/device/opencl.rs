@@ -111,7 +111,7 @@ impl Program for CLProgram {
             for (i, b) in bufs.into_iter().enumerate() {
                 self.kernel.set_arg(i as _, &b.ptr());
             }
-            opencl3::command_queue::enqueue_nd_range_kernel(
+            if opencl3::command_queue::enqueue_nd_range_kernel(
                 self.device.queue.get(),
                 self.kernel.get(),
                 global_size.len() as _,
@@ -125,7 +125,24 @@ impl Program for CLProgram {
                 0,
                 std::ptr::null(),
             )
-            .expect(&format!("enqueue failed {:?} {:?} {:?}", bufs, global_size, local_size));
+            .is_err_and(|e| e == -4)
+            {
+                ALLOCTOR.0.free_cached();
+                opencl3::command_queue::enqueue_nd_range_kernel(
+                    self.device.queue.get(),
+                    self.kernel.get(),
+                    global_size.len() as _,
+                    std::ptr::null(),
+                    global_size.as_ptr() as _,
+                    if local_size.is_some() {
+                        local_size.as_ref().unwrap().as_ptr() as _
+                    } else {
+                        std::ptr::null()
+                    },
+                    0,
+                    std::ptr::null(),
+                );
+            }
         }
     }
 }
@@ -273,6 +290,10 @@ impl Default for CLRenderer {
 impl crate::ops::Op for CLRenderer {
     fn mulacc(&self, a: &str, b: &str, c: &str) -> String {
         format!("mad({a}, {b}, {c})")
+    }
+
+    fn _where(&self, a: &str, b: &str, c: &str) -> String {
+        format!("((bool)({a})?{b}:{c})")
     }
 }
 

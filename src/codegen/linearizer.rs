@@ -1161,6 +1161,17 @@ impl Linearizer {
                                 Some(x.args),
                             );
                         }
+                        let castop = &x.src[0];
+                        if castop.optype() == Unary::Cast {
+                            let mlop = &castop.src()[0];
+                            if mlop.optype() == Binary::Mul {
+                                x = LazyOp::new(
+                                    OpType::Ternary(Ternary::Mulacc),
+                                    v![LazyOp::new(OpType::Unary(Unary::Cast), vec![s], Some(castop.lo().args.clone())).into(), for s in mlop.src()],
+                                    Some(x.args),
+                                );
+                            }
+                        }
                     }
                     _ => (),
                 }
@@ -1335,6 +1346,7 @@ pub fn rename_var(v: ArcNode, expr: &str) -> ArcNode {
 impl Linearizer {
     pub fn uop_alu_idx(&mut self, a: UOp, b: ArcNode, op: OpType, dtype: Option<Dtype>) -> UOp {
         let b = self.render(b);
+        let dtype = Some(dtype.unwrap_or(int32));
         self.uop_default(UOps::ALU, dtype, vec![a, b], vec![Arg::OpType(op)])
     }
 
