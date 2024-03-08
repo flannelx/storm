@@ -611,8 +611,7 @@ impl Linearizer {
             } else if !matches!(u.uop, UOps::CONST | UOps::ALU | UOps::CAST | UOps::LOAD) {
                 loop_stack.last_mut().unwrap().push(u.clone())
             } else {
-                let parents =
-                    HashSet::<&UOp>::from_iter(get_recursive_parents(u, &mut acc_scope, true));
+                let parents = get_recursive_parents(u, &mut acc_scope, true);
                 if any(&v![u.uop == UOps::DEFINE_LOCAL, for u in parents.iter()]) {
                     loop_stack.last_mut().unwrap().push(u.clone());
                 } else {
@@ -622,7 +621,7 @@ impl Linearizer {
                             break;
                         }
                         for x in loop_stack[i].iter() {
-                            if parents.contains(x) {
+                            if parents.contains(&x) {
                                 loop_stack[i].push(u.clone());
                                 break 'out;
                             }
