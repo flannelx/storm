@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use half::{bf16, f16};
 
+use crate::v;
+
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Default)]
 pub struct Dtype {
     pub priority: usize,
@@ -397,36 +399,47 @@ NumTypeImpl!(bf16);
 
 #[rustfmt::skip]
 lazy_static::lazy_static! {
-    pub static ref type_rules: HashMap<Dtype, HashSet<Dtype>> = HashMap::from([
-    (_bool,    HashSet::from([_bool,     uint8,     uint16,    uint32,    uint64,    int8,      int16,     int32,     int64,     float16,   float32,   bfloat16])),
-    (uint8,    HashSet::from([uint8,     uint8,     uint16,    uint32,    uint64,    int16,     int16,     int32,     int64,     float16,   float32,   bfloat16])),
-    (uint16,   HashSet::from([uint16,    uint16,    uint16,    uint32,    uint64,    int32,     int32,     int32,     int64,     float16,   float32,   bfloat16])),
-    (uint32,   HashSet::from([uint32,    uint32,    uint32,    uint32,    uint64,    int64,     int64,     int64,     int64,     float16,   float32,   bfloat16])),
-    (uint64,   HashSet::from([uint64,    uint64,    uint64,    uint64,    uint64,    float32,   float32,   float32,   float32,   float16,   float32,   bfloat16])),
-    (int8,     HashSet::from([int8,      int16,     int32,     int64,     float32,   int8,      int16,     int32,     int64,     float16,   float32,   bfloat16])),
-    (int16,    HashSet::from([int16,     int16,     int32,     int64,     float32,   int16,     int16,     int32,     int64,     float16,   float32,   bfloat16])),
-    (int32,    HashSet::from([int32,     int32,     int32,     int64,     float32,   int32,     int32,     int32,     int64,     float16,   float32,   bfloat16])),
-    (int64,    HashSet::from([int64,     int64,     int64,     int64,     float32,   int64,     int64,     int64,     int64,     float16,   float32,   bfloat16])),
-    (float16,  HashSet::from([float16,   float16,   float16,   float16,   float16,   float16,   float16,   float16,   float16,   float16,   float32,   float32])),
-    (float32,  HashSet::from([float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32,   float32])),
-    (bfloat16, HashSet::from([bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  bfloat16,  float32,   float32,   bfloat16])),
+    pub static ref promo_lattice: HashMap<Dtype, HashSet<Dtype>> = HashMap::from([
+    (_bool,    HashSet::from([uint8, int8])),
+    (uint8,    HashSet::from([uint16, int16])),
+    (uint16,   HashSet::from([uint32, int32])),
+    (uint32,   HashSet::from([uint64, int64])),
+    (uint64,   HashSet::from([float16])),
+    (int8,     HashSet::from([int16])),
+    (int16,    HashSet::from([int32])),
+    (int32,    HashSet::from([int64])),
+    (int64,    HashSet::from([float16])),
+    (float16,  HashSet::from([float32])),
+    //(bfloat16, HashSet::from([float32])),
+    (float32,  HashSet::from([float64])),
     ]);
 }
+use cached::proc_macro::cached;
+use cached::SizedCache;
 
-pub fn least_upper_dtype(dtypes: &[Dtype]) -> Dtype {
-    let mut rets = HashSet::new();
-    for d in dtypes {
-        if rets.is_empty() {
-            if !type_rules.contains_key(&d) {
-                panic!("{:?}", d);
-            }
-            rets = type_rules[d].clone();
+#[cached]
+pub fn _get_recur_parent(dtype: Dtype) -> HashSet<Dtype> {
+    let mut ret = HashSet::from([dtype.clone()]);
+    if dtype != float64 {
+        for d in promo_lattice[&dtype].iter() {
+            ret.extend(_get_recur_parent(d.clone()));
         }
-        rets = rets.intersection(&type_rules[d]).cloned().collect();
     }
-    rets.iter().min().unwrap().to_owned()
+    ret
 }
 
+#[cached(
+    type = "SizedCache<String, Dtype>",
+    create = "{ SizedCache::with_size(100) }",
+    convert = r#"{ format!("{:?}", dtypes) }"#
+)]
+pub fn least_upper_dtype(dtypes: &[Dtype]) -> Dtype {
+    let mut rets = _get_recur_parent(dtypes[0].clone());
+    for d in dtypes.iter().skip(1) {
+        rets = rets.intersection(&_get_recur_parent(d.clone())).cloned().collect();
+    }
+    rets.iter().min().unwrap().to_owned().clone()
+}
 
 pub fn least_upper_float(dtype: &Dtype) -> Dtype {
     if dtype.is_float() {

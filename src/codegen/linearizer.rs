@@ -801,32 +801,47 @@ impl Linearizer {
                     for x in 0..1 {
                         if op == Binary::Add
                             && vin[x].uop == UOps::CONST
-                            && &vin[x].args[0].to_str() == "0.0"
+                            && vin[x].args[0]
+                                .to_str()
+                                .parse::<f32>()
+                                .is_ok_and(|s| s == 0.0)
                         {
                             return vin[1 - x].to_owned();
                         }
                         if op == Binary::Mul
                             && vin[x].uop == UOps::CONST
-                            && &vin[x].args[0].to_str() == "1.0"
+                            && vin[x].args[0]
+                                .to_str()
+                                .parse::<f32>()
+                                .is_ok_and(|s| s == 1.0)
                         {
                             return vin[1 - x].to_owned();
                         }
                         if op == Binary::Mul
                             && vin[x].uop == UOps::CONST
-                            && &vin[x].args[0].to_str() == "0.0"
+                            && vin[x].args[0]
+                                .to_str()
+                                .parse::<f32>()
+                                .is_ok_and(|s| s == 0.0)
                         {
                             return vin[x].to_owned();
                         }
                     }
                     if op == Binary::Sub
                         && vin[1].uop == UOps::CONST
-                        && &vin[1].args[0].to_str() == "0.0"
+                        && vin[1].args[0]
+                            .to_str()
+                            .parse::<f32>()
+                            .is_ok_and(|s| s == 0.0)
                     {
                         return vin[0].to_owned();
                     }
                     if op == Binary::Div
                         && vin[1].uop == UOps::CONST
-                        && &vin[1].args[0].to_str() == "1.0"
+                        && vin[1].args[0]
+                            .to_str()
+                            .parse::<f32>()
+                            .is_ok_and(|s| s == 1.0)
                     {
                         return vin[0].to_owned();
                     }

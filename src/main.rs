@@ -7,8 +7,6 @@ use storm::{
 };
 
 fn main() {
-    let a = Tensor::rand([3,3]);
-    let b = Tensor::rand([3,3]).cast(float16).realize();
-    let x = Tensor::rand([3,3]);
-    let c = (a + b + x).realize();
+    let a = Tensor::arange(10.).pow(2., false);
+    println!("{}", a.nd())
 }

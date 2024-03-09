@@ -24,7 +24,6 @@ pub fn adam_with<'a>(params: &[*mut Tensor], p: &[f32]) -> LAMP {
         true,
     )
 }
-
 //def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, wd=0.0, adam=False):
 #[derive(Debug)]
 pub struct LAMP {

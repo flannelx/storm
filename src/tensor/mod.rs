@@ -202,13 +202,8 @@ impl Tensor {
     }
 
     pub fn _const<N: NumType>(value: N) -> Self {
-        let dtype = crate::dtype::name_to_dtype(std::any::type_name::<N>());
-        let defualt_dtype = if dtype.size > float32.size {
-            crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>())
-        } else {
-            dtype.clone()
-        };
-        Self::from_buf(LazyBuffer::_const(value, dtype, "GPU")).cast(defualt_dtype)
+        let value = value.to_f32().unwrap();
+        Self::from_buf(LazyBuffer::_const(value, float32, "GPU"))
     }
 
     pub fn const_like<T: NumType>(&self, const_value: T) -> Self {
@@ -1248,7 +1243,7 @@ impl Tensor {
                 return self.reciprocal().pow(-x, false);
             }
             if [0., 1., 2., 3.].contains(&cv) {
-                let mut acc = self.const_like(1);
+                let mut acc = self.const_like(1.);
                 for i in 0..cv as usize {
                     acc = &acc * self;
                 }
@@ -1266,12 +1261,12 @@ impl Tensor {
         };
         let mut base_sign = if !reverse { self.sign() } else { x.sign() };
         if !reverse {
-            base_sign = base_sign - (1.5 * (1 - self.sign().abs()));
+            base_sign = base_sign - (1.5 * (1. - self.sign().abs()));
         } else {
-            base_sign = base_sign - (1.5 * (1 - x.sign().abs()));
+            base_sign = base_sign - (1.5 * (1. - x.sign().abs()));
         }
-        base_sign = (&base_sign - 1) / -2;
-        ar.mul(&(sign * &base_sign + (1 - &base_sign)))
+        base_sign = (&base_sign - 1.) / -2.;
+        ar.mul(&(sign * &base_sign + (1. - &base_sign)))
         //ar.mul(&(sign * &base_sign))
     }
 
