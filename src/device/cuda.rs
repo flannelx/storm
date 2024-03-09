@@ -173,6 +173,10 @@ pub struct CudaBuffer {
 }
 
 impl Buffer for CudaBuffer {
+    fn device(&self) -> String {
+        "CUDA".into()
+    }
+
     fn ptr(&self) -> *mut core::ffi::c_void {
         self.ptr as _
     }

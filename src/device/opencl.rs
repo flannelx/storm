@@ -56,6 +56,10 @@ pub struct CLBuffer {
 }
 
 impl Buffer for CLBuffer {
+    fn device(&self) -> String {
+        "OPENCL".into()
+    }
+
     fn ptr(&self) -> *mut core::ffi::c_void {
         self.ptr
     }

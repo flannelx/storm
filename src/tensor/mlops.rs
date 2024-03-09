@@ -117,7 +117,6 @@ pub trait Function: DynClone + core::fmt::Debug {
             }
         }
         Tensor {
-            device: ret_buffer.device.clone(),
             buffer: ret_buffer.into(),
             require_grad,
             _ctx: if require_grad {

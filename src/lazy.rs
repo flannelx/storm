@@ -89,7 +89,6 @@ pub struct LazyBuffer {
     pub shape: Vec<isize>,
     pub id: LazyBufferId,
     pub dtype: Dtype,
-    pub device: String,
     pub force_realize: bool,
     pub contiguous_child: Arc<Option<(Self, ShapeTracker)>>,
 }
@@ -118,7 +117,6 @@ impl core::fmt::Debug for LazyBuffer {
 
 impl LazyBuffer {
     pub fn new(
-        device: &str,
         st: ShapeTracker,
         optype: OpType,
         op: LazyOp,
@@ -126,7 +124,6 @@ impl LazyBuffer {
         base: Option<Arc<LazyBuffer>>,
     ) -> Self {
         let mut ret = Self {
-            device: device.into(),
             lazyop: op.into(),
             shape: st.shape_vec(),
             st: st.into(),
@@ -161,6 +158,14 @@ impl LazyBuffer {
         ret
     }
 
+    pub fn device(&self) -> String {
+        if let Some(d) = self.device_buffer.as_ref() {
+            d.device()
+        } else {
+            "Unrealized".into()
+        }
+    }
+
     pub fn base(&self) -> Self {
         if self._base.is_some() {
             return self._base.as_ref().unwrap().as_ref().clone();
@@ -190,7 +195,6 @@ impl LazyBuffer {
         optype: OpType,
         shape: &[isize],
         dtype: Dtype,
-        device: &str,
         args: Option<Vec<Arg>>,
         src: Option<LazyBuffer>,
     ) -> Self {
@@ -199,7 +203,6 @@ impl LazyBuffer {
             ss.push(src.into());
         };
         create_lazybuffer(
-            device,
             ShapeTracker::new(shape, None),
             LazyOp::new(optype, ss, args),
             dtype,
@@ -207,12 +210,11 @@ impl LazyBuffer {
         )
     }
 
-    pub fn _const(val: impl Display, dtype: Dtype, device: &str) -> Self {
+    pub fn _const(val: impl Display, dtype: Dtype) -> Self {
         Self::loadop(
             OpType::Load(Load::Const),
             &vec![1],
             dtype,
-            device,
             Some(vec![Arg::Str(val.to_string())]),
             None,
         )
@@ -223,7 +225,6 @@ impl LazyBuffer {
             OpType::Load(Load::Const),
             &vec![1],
             self.dtype.clone(),
-            &self.device,
             Some(vec![Arg::Str(val.to_string())]),
             None,
         )
@@ -245,7 +246,6 @@ impl LazyBuffer {
             // views: HashSet::new(),
             id: lb_id(),
             dtype: dtype::type_to_dtype::<u8>(),
-            device: "GPU".into(),
             force_realize: false,
             contiguous_child: Arc::new(None),
         }
@@ -269,7 +269,6 @@ impl LazyBuffer {
             // views: HashSet::new(),
             id: lb_id(),
             dtype: dtype::type_to_dtype::<T>(),
-            device: "GPU".into(),
             force_realize: false,
             contiguous_child: Arc::new(None),
         }
@@ -320,13 +319,12 @@ impl LazyBuffer {
 
     pub fn _view(&self, op: Movement, new_st: ShapeTracker) -> Self {
         if self.st.size() == 0 {
-            return Self::_const(0, self.dtype.clone(), &self.device).reshape(&new_st.shape().dims);
+            return Self::_const(0, self.dtype.clone()).reshape(&new_st.shape().dims);
         }
         if new_st.contiguous() && self.base_ref().shape == new_st.shape().dims {
             self.base()
         } else {
             create_lazybuffer(
-                &self.device.clone(),
                 new_st,
                 LazyOp::new(OpType::Movement(op), vec![], None),
                 self.dtype.clone(),
@@ -375,7 +373,6 @@ impl LazyBuffer {
         //     _bool
         // };
         create_lazybuffer(
-            &self.device,
             ShapeTracker::new(&self.shape, None),
             LazyOp::new(optype, srcs, None),
             self.dtype.clone(),
@@ -389,7 +386,6 @@ impl LazyBuffer {
         }
         let unbound_new_shape = new_shape;
         create_lazybuffer(
-            &self.device,
             ShapeTracker::new(new_shape, None),
             LazyOp::new(
                 optype,
@@ -418,7 +414,6 @@ impl LazyBuffer {
         }
         let bitcast = bitcast.unwrap_or(false);
         create_lazybuffer(
-            &self.device.clone(),
             ShapeTracker::from_shape(&self.shape),
             LazyOp::new(
                 ops::Unary::Cast.into(),
@@ -490,7 +485,6 @@ impl LazyBuffer {
 }
 
 pub fn create_lazybuffer(
-    device: &str,
     st: ShapeTracker,
     op: LazyOp,
     dtype: Dtype,
@@ -501,7 +495,7 @@ pub fn create_lazybuffer(
         optype,
         OpType::Load(Load::Empty) | OpType::Load(Load::Rand) | OpType::Load(Load::Const)
     ) {
-        let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
+        let ret = LazyBuffer::new(st, optype, op, dtype, base);
         if DEBUG.0.contains("LB") {
             println!("{} {:?}", ret.id, ret);
         }
@@ -514,7 +508,7 @@ pub fn create_lazybuffer(
     //   return lazycache[wop]
     //
     // lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
-    let ret = LazyBuffer::new(device, st, optype, op, dtype, base);
+    let ret = LazyBuffer::new(st, optype, op, dtype, base);
     if DEBUG.0.contains("LB") {
         println!("{} {:?}", ret.id, ret);
     }

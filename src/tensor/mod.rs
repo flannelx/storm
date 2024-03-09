@@ -44,12 +44,11 @@ pub struct Tensor {
     pub grad: Arc<Mutex<Option<Tensor>>>,
     pub _ctx: Option<Box<dyn Function>>,
     pub id: TensorId,
-    pub device: String,
 }
 
 impl Tensor {
     pub fn device(&self) -> String {
-        self.device.clone()
+        self.buffer.device()
     }
 
     pub fn dtype(&self) -> Dtype {
@@ -70,7 +69,6 @@ impl Tensor {
             grad: Arc::default(),
             _ctx: None,
             id: tensor_id(),
-            device: buf.device.clone(),
             buffer: buf.into(),
         }
     }
@@ -82,7 +80,7 @@ impl Tensor {
             .map(|e| TensorDefaultType::from_f64(e.to_f64().unwrap()).unwrap())
             .collect::<Vec<TensorDefaultType>>();
         let buffer = if data.len() == 1 {
-            LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>(), "GPU")
+            LazyBuffer::_const(data[0], dtype::type_to_dtype::<TensorDefaultType>())
         } else {
             LazyBuffer::from_cpu(data)
         };
@@ -91,7 +89,6 @@ impl Tensor {
             _ctx: None,
             id: tensor_id(),
             grad: Arc::new(Mutex::new(None)),
-            device: buffer.device.clone(),
             buffer: buffer.into(),
         }
     }
@@ -107,7 +104,6 @@ impl Tensor {
             _ctx: None,
             id: tensor_id(),
             grad: Arc::new(Mutex::new(None)),
-            device: buffer.device.clone(),
             buffer: buffer.into(),
         }
     }
@@ -166,20 +162,12 @@ impl Tensor {
         op: OpType,
         size: usize,
         dtype: Dtype,
-        device: Option<&str>,
         args: Option<Vec<Arg>>,
     ) -> Self {
         Self::from_buf(LazyBuffer::loadop(
             op,
             &[size as isize],
             dtype,
-            {
-                if device.is_none() {
-                    "GPU"
-                } else {
-                    device.unwrap()
-                }
-            },
             {
                 if args.is_some() {
                     args
@@ -198,12 +186,12 @@ impl Tensor {
             "load op can not infer dim"
         );
         let dtype = crate::dtype::name_to_dtype(std::any::type_name::<TensorDefaultType>());
-        Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None, None)
+        Self::_load(OpType::Load(Load::Empty), shape.numel(), dtype, None)
     }
 
     pub fn _const<N: NumType>(value: N) -> Self {
         let value = value.to_f32().unwrap();
-        Self::from_buf(LazyBuffer::_const(value, float32, "GPU"))
+        Self::from_buf(LazyBuffer::_const(value, float32))
     }
 
     pub fn const_like<T: NumType>(&self, const_value: T) -> Self {
@@ -229,7 +217,6 @@ impl Tensor {
     pub fn rand<S: Into<Shape>>(shape: S) -> Self {
         let shape = shape.into();
         Self::from_buf(LazyBuffer::new(
-            "GPU",
             crate::shape::ShapeTracker::from_shape(&shape.dims),
             OpType::Load(Load::Rand),
             LazyOp::new(OpType::Load(Load::Rand), vec![], None),
@@ -893,7 +880,6 @@ impl Tensor {
                 .clone();
             let grads = match t0._ctx.as_mut().unwrap().backward(&t0g_clone) {
                 Grad::One(g) => vec![Some(Tensor {
-                    device: g.device.clone(),
                     buffer: g.into(),
                     require_grad: false,
                     grad: Arc::default(),
@@ -909,7 +895,6 @@ impl Tensor {
                         //     println!("{:?}", g);
                         // }
                         Some(Tensor {
-                            device: g.device.clone(),
                             buffer: g.into(),
                             require_grad: false,
                             grad: Arc::default(),
@@ -926,7 +911,6 @@ impl Tensor {
                         //     println!("{:?}", g);
                         // }
                         Some(Tensor {
-                            device: g.device.clone(),
                             buffer: g.into(),
                             require_grad: false,
                             grad: Arc::default(),
@@ -1230,7 +1214,6 @@ impl Tensor {
             grad: Arc::default(),
             _ctx: None,
             id: tensor_id(),
-            device: self.device.clone(),
             buffer: self.buffer.clone(),
         }
     }

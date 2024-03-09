@@ -101,6 +101,7 @@ pub trait Program: core::fmt::Debug {
 
 // Also need to implement Drop
 pub trait Buffer: core::fmt::Debug {
+    fn device(&self) -> String;
     fn ptr(&self) -> *mut core::ffi::c_void;
     fn dtype(&self) -> Dtype;
     fn bytesize(&self) -> usize;
