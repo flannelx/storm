@@ -27,17 +27,19 @@ impl Buffer for WGPUBuffer {
     }
 
     fn to_cpu(&self) -> Vec<u8> {
+        let mut dst = vec![0u8; self.bytesize()];
+        let ptr = dst.as_mut_ptr() as *mut u8;
+        DEVICE.copyout(self, ptr);
+        DEVICE.synchronize();
+        dst
+    }
+}
+
+impl Drop for WGPUBuffer {
+    fn drop(&mut self) {
         unsafe {
-            let mut buffer = &*(self.buffer);
-            buffer.slice(..).map_async(wgpu::MapMode::Read, |result| {
-                result.unwrap();
-            });
-            DEVICE.synchronize();
-            let r = buffer.slice(..).get_mapped_range();
-            let ret = r.get(..).unwrap().to_vec();
-            drop(r);
-            buffer.unmap();
-            ret
+            (*self.buffer).destroy();
+            self.buffer.drop_in_place();
         }
     }
 }
@@ -89,7 +91,9 @@ impl Device for WGPUDevice {
                 &wgpu::BufferDescriptor {
                     label: None,
                     size: (size * dtype.size) as _,
-                    usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                    usage: wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::STORAGE,
                     mapped_at_creation: false,
                 },
             ))),
@@ -116,7 +120,36 @@ impl Device for WGPUDevice {
     }
 
     fn copyout(&self, src: &dyn super::Buffer, dst: *mut u8) {
-        todo!()
+        let staging_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: src.bytesize() as _,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        unsafe {
+            encoder.copy_buffer_to_buffer(
+                &*(src.ptr() as *mut wgpu::Buffer),
+                0,
+                &staging_buf,
+                0,
+                src.bytesize() as _,
+            );
+            self.queue.submit(Some(encoder.finish()));
+            staging_buf
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, |result| {
+                    result.unwrap();
+                });
+            self.synchronize();
+            let r = staging_buf.slice(..).get_mapped_range();
+            let mut ret = r.get(..).unwrap().to_vec();
+            drop(r);
+            staging_buf.unmap();
+            std::ptr::copy_nonoverlapping(ret.as_mut_ptr(), dst, src.bytesize());
+        }
     }
 
     fn copyin(&self, src: Vec<u8>, dst: &dyn super::Buffer) {
