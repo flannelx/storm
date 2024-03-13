@@ -2,10 +2,10 @@ use std::{collections::{BTreeSet, HashSet, HashMap}, hash::Hash, sync::Arc};
 
 use crate::dtype::NumType;
 
-pub fn getenv<T: std::fmt::Debug + Default + std::str::FromStr>(s: &str, default: T) -> T {
+pub fn getenv<T: std::fmt::Display + Default + std::str::FromStr>(s: &str, default: T) -> T {
     let s = s.to_uppercase();
     std::env::var(s)
-        .unwrap_or(format!("{:?}", default))
+        .unwrap_or(format!("{}", default))
         .parse::<T>()
         .unwrap_or(T::default())
 }

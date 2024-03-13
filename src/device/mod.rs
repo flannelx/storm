@@ -18,27 +18,31 @@ lazy_static::lazy_static! {
         cuda::CudaDevice::new,
         #[cfg(not(any(target_arch = "wasm32")))]
         opencl::CLDevice::new,
+        wgpu::WGPUDevice::new,
     ];
 }
 
 lazy_static::lazy_static! {
     pub static ref DEVICE: Arc<dyn Device> = {
-        match getenv::<String>("DEVICE", "".into()).to_uppercase().as_str() {
-            #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-            "CUDA" => cuda::CudaDevice::new().unwrap(),
-            #[cfg(not(any(target_arch = "wasm32")))]
-            "OPENCL" => opencl::CLDevice::new().unwrap(),
-            _ =>  {
-                let mut d = vec![];
-                for func in DEVICES.iter() {
-                    if let Ok(device) = func() {
+        let d_name = getenv::<String>("DEVICE", "".into()).to_string().to_uppercase();
+        let mut d = vec![];
+        for func in DEVICES.iter() {
+            if let Ok(device) = func() {
+                if d_name.len() > 0  {
+                    if d_name == device.name() {
                         d.push(device);
                         break;
                     }
+                } else {
+                    d.push(device);
+                    break;
                 }
-                d[0].to_owned()
             }
         }
+        if d.len() == 0 {
+            panic!("no available backend found")
+        }
+        d[0].to_owned()
     };
 }
 
@@ -50,6 +54,7 @@ lazy_static::lazy_static! {
 
 pub mod cuda;
 pub mod opencl;
+pub mod wgpu;
 
 pub mod prelude {
     pub use super::{ALLOCTOR, DEVICE};
@@ -106,7 +111,6 @@ pub trait Buffer: core::fmt::Debug {
     fn dtype(&self) -> Dtype;
     fn bytesize(&self) -> usize;
     fn to_cpu(&self) -> Vec<u8>;
-    fn from_cpu(&mut self, data: Vec<u8>);
 }
 
 #[derive(Default)]
@@ -122,7 +126,9 @@ impl Allocator {
         unsafe {
             let mut cc = self.cached.clone();
             let cached = Arc::get_mut_unchecked(&mut cc);
-            if let Some(mems) = cached.get_mut(&(size * dtype.size)) && !mems.is_empty() {
+            if let Some(mems) = cached.get_mut(&(size * dtype.size))
+                && !mems.is_empty()
+            {
                 DEVICE.buf_from_mem_ptr(size, dtype, mems.pop().unwrap())
             } else {
                 if let Ok(b) = DEVICE._alloc(size, dtype.clone()) {

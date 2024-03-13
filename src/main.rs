@@ -1,12 +1,7 @@
-use half::{bf16, f16};
-use ndarray::ArrayD;
-use storm::{
-    nn::{Conv2d, GroupNorm},
-    prelude::*,
-    shape::ShapeTracker,
-};
+use storm::device::wgpu::WGPUDevice;
+use storm::prelude::*;
 
 fn main() {
-    let a = Tensor::arange(10.).pow(2., false);
-    println!("{}", a.nd())
+    let t = Tensor::rand([3,3]);
+    println!("{:?}", t.nd());
 }

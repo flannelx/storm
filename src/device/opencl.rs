@@ -79,10 +79,6 @@ impl Buffer for CLBuffer {
         DEVICE.synchronize();
         dst
     }
-
-    fn from_cpu(&mut self, data: Vec<u8>) {
-        DEVICE.copyin(data, self);
-    }
 }
 
 impl Drop for CLBuffer {

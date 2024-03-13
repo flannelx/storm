@@ -578,7 +578,7 @@ fn _realize_rand(buffer: &LazyBuffer) {
     let mut on_cpu = gen_rand_num_bytes(numel, &buffer.dtype);
     unsafe {
         let mut b = DEVICE.alloc(numel, buffer.dtype.clone());
-        Arc::get_mut_unchecked(&mut b).from_cpu(on_cpu);
+        DEVICE.copyin(on_cpu, b.as_ref());
         Arc::get_mut_unchecked(&mut buffer.device_buffer).replace(b);
     }
 }

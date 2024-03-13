@@ -195,10 +195,6 @@ impl Buffer for CudaBuffer {
         DEVICE.copyout(self, ptr);
         dst
     }
-
-    fn from_cpu(&mut self, data: Vec<u8>) {
-        DEVICE.copyin(data, self);
-    }
 }
 
 impl Drop for CudaBuffer {
