@@ -1,4 +1,4 @@
-use dtype::least_upper_dtype;
+use dtype::{least_upper_dtype, Dtype};
 
 use crate::arg::Arg;
 use crate::codegen::kernel::Buffers;
@@ -32,8 +32,8 @@ pub struct LanguageOpts {
     pub external_local_bufs: bool,
     pub uses_ptr_arithmetic: bool,
     pub launch_bounds: bool,
-    pub code_for_workitem: HashMap<&'static str,Vec<String>>,
-    pub type_map: HashMap<String, String>
+    pub code_for_workitem: HashMap<&'static str, Vec<String>>,
+    pub type_map: HashMap<Dtype, String>,
 }
 
 impl Default for LanguageOpts {
@@ -70,7 +70,6 @@ pub trait Renderer: 'static + Send + Sync + Op {
 
     fn render_cast(&self, x: &[&str], var_dtype: dtype::Dtype) -> String {
         assert!(x.len() == var_dtype.sz);
-        assert!(self.lang_opts().float4.is_some());
         if x.len() == 1 {
             return format!("({})({})", var_dtype.c_name, x[0]);
         }
@@ -183,7 +182,7 @@ pub trait Renderer: 'static + Send + Sync + Op {
         }
     }
 
-    fn render_local(&self, name: &str, size: usize) -> String {
+    fn render_local(&self, name: &str, size: usize, dtype: Dtype) -> String {
         self.lang_opts().smem_prefix.clone() + &format!("float {name}[{size}];")
     }
 
@@ -478,7 +477,9 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                         "{} {} = {}; /* {} */",
                         lang.lang_opts().size_prefix,
                         args[1],
-                        lang.lang_opts().code_for_workitem[(args[1].as_bytes()[0] as char).to_string().as_str()][args[0].parse::<usize>().unwrap()],
+                        lang.lang_opts().code_for_workitem
+                            [(args[1].as_bytes()[0] as char).to_string().as_str()]
+                            [args[0].parse::<usize>().unwrap()],
                         args[2]
                     ),
                     &mut kernel,
@@ -614,12 +615,14 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
                     prekernel.push(lang.render_local(
                         &args[0].to_str(),
                         args[1].to_str().parse::<usize>().unwrap(),
+                        u.dtype.clone().unwrap(),
                     ))
                 } else {
                     kk(
                         &lang.render_local(
                             &args[0].to_str(),
                             args[1].to_str().parse::<usize>().unwrap(),
+                            u.dtype.clone().unwrap(),
                         ),
                         &mut kernel,
                         depth,
@@ -658,8 +661,8 @@ pub fn uops_to_cstyle(lang: Arc<dyn Renderer>, function_name: &str, uops: &[UOp]
             }
             UOps::IF => {
                 kk(&lang.render_if(&r[&vin[0]]), &mut kernel, depth);
-                depth +=1;
-            },
+                depth += 1;
+            }
         }
     }
     lang.render_kernel(function_name, &kernel, &bufs, &local_size, uops, &prekernel)

@@ -61,6 +61,9 @@ pub mod prelude {
 }
 
 pub trait Device: Send + Sync + core::fmt::Debug {
+    fn device_ptr(&self) -> *mut std::ffi::c_void {
+        todo!();
+    }
     fn name(&self) -> String;
     fn _alloc(&self, size: usize, dtype: Dtype) -> anyhow::Result<Arc<dyn Buffer>>;
     fn alloc(&self, size: usize, dtype: Dtype) -> Arc<dyn Buffer> {

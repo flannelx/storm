@@ -38,13 +38,13 @@ impl Default for CudaRenderer {
                     (
                         "g".into(),
                         (0..3)
-                            .map(|i| format!("blockIdx.{}", (120u8 + i) as char,))
+                            .map(|i| format!("blockIdx.{}", ('x' as u8 + i) as char))
                             .collect(),
                     ),
                     (
                         "l".into(),
                         (0..3)
-                            .map(|i| format!("threadIdx.{}", (120u8 + i) as char,))
+                            .map(|i| format!("threadIdx.{}", ('x' as u8 + i) as char))
                             .collect(),
                     ),
                     (
@@ -53,9 +53,9 @@ impl Default for CudaRenderer {
                             .map(|i| {
                                 format!(
                                     "(blockIdx.{}*blockDim.{}+threadIdx.{})",
-                                    (120u8 + i) as char,
-                                    (120u8 + i) as char,
-                                    (120u8 + i) as char,
+                                    ('x' as u8  + i) as char,
+                                    ('x' as u8  + i) as char,
+                                    ('x' as u8  + i) as char,
                                 )
                             })
                             .collect(),
