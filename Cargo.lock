@@ -1272,7 +1272,6 @@ dependencies = [
 [[package]]
 name = "mnist"
 version = "0.1.0"
-source = "git+https://github.com/allen-dai/mnist#fc918288e6ca4d1007a2c7bbe52d0466a3aa584c"
 dependencies = [
  "anyhow",
  "byteorder",

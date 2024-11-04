@@ -1,4 +1,4 @@
-#![cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+#![cfg(not(any(target_os = "macos", target_arch = "wasm32", target_arch = "aarch64")))]
 
 use cudarc::driver::result::malloc_sync;
 use cudarc::driver::sys::{

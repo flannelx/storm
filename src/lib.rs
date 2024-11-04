@@ -1,4 +1,4 @@
-#![feature(get_mut_unchecked, exclusive_range_pattern, let_chains)]
+#![feature(get_mut_unchecked, let_chains)]
 #![allow(unused, non_snake_case, non_upper_case_globals)]
 
 use std::collections::HashSet;
