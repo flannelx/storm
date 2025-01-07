@@ -1,41 +1,6 @@
 [package]
 name = "storm"
 version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2024"
 
 [dependencies]
-anyhow = "1.0.79"
-cached = { version = "0.49.2", features = ["wasm"] }
-dyn-clone = "1.0.16"
-getrandom = { version = "0.2.12", features = ["js"] }
-half = { version = "2.3.1", features = ["num-traits", "rand_distr", "zerocopy"] }
-itertools = "0.12.0"
-lazy_static = "1.4.0"
-memmap2 = "0.9.4"
-ndarray = "0.15.6"
-num-traits = "0.2.17"
-pollster = "0.3.0"
-rand = "0.8.5"
-safetensors = "0.4.2"
-wgpu = "=0.18"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-opencl3 = "0.9.4"
-[target.'cfg(not(any(target_os = "macos", target_arch = "wasm32")))'.dependencies]
-cudarc = "0.10.0"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-kdam = "0.5.1"
-float-cmp = "0.9.0"
-image = "0.24.7"
-mnist = { git = "https://github.com/allen-dai/mnist" }
-open = "5.0.1"
-project-root = "0.2.2"
-regex = "1.10.3"
-reqwest = { version = "0.11.24", features = ["blocking"] }
-sdl2 = "0.36.0"
-serde_json = "1.0.113"
-tokio = "1.36.0"
-trauma = "2.2.4"
